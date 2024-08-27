@@ -1,0 +1,111 @@
+From e2d65b1ca29cc3a06a90e2b1a9c70796c91864fe Mon Sep 17 00:00:00 2001
+From: Brad D <social@brandongrows.me>
+Date: Tue, 27 Aug 2024 13:29:22 -0500
+Subject: [PATCH] setup-matrix github actions fix
+
+---
+ .dockerignore        |  7 ++++++-
+ Dockerfile           | 19 ++++++++++++++-----
+ action.yml           |  2 +-
+ main.sh              |  8 ++++++++
+ requirements-dev.txt |  6 ------
+ requirements.txt     |  1 -
+ 6 files changed, 29 insertions(+), 14 deletions(-)
+ create mode 100755 main.sh
+ delete mode 100644 requirements-dev.txt
+ delete mode 100644 requirements.txt
+
+diff --git a/.dockerignore b/.dockerignore
+index 0488914..f0033ad 100644
+--- a/.dockerignore
++++ b/.dockerignore
+@@ -1,5 +1,10 @@
+ *
+ 
+ !Dockerfile
+-!requirements.txt
++!Pipfile
++!Pipfile.lock
+ !main.py
++!main.sh
++!.venv/.project
++!.venv
++!get-pipenv.py
+diff --git a/Dockerfile b/Dockerfile
+index cab9c8d..78bd745 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,13 +1,22 @@
+-FROM python:3
++FROM python:3.10-alpine
+ 
+ WORKDIR /app
+ 
+-RUN pip install -IU pip setuptools wheel
++COPY .venv .
++COPY get-pipenv.py .
+ 
+-COPY requirements.txt .
++ENV PIPENV_VENV_IN_PROJECT=1
+ 
+-RUN pip install -IUr requirements.txt
++COPY Pipfile .
++COPY Pipfile.lock .
+ 
++RUN python3 /app/get-pipenv.py
++
++COPY .venv/.project ./.venv/.project
++
++RUN pipenv sync -d
++
++COPY main.sh .
+ COPY main.py .
+ 
+-ENTRYPOINT /app/main.py
++ENTRYPOINT /app/main.sh
+diff --git a/action.yml b/action.yml
+index bdb95c9..8b0540e 100644
+--- a/action.yml
++++ b/action.yml
+@@ -13,4 +13,4 @@ outputs:
+     description: Strategy matrix in JSON format, ready to be used in other jobs.
+ runs:
+   using: docker
+-  image: Dockerfile
++  image: setup-matrix
+diff --git a/main.sh b/main.sh
+new file mode 100755
+index 0000000..4618220
+--- /dev/null
++++ b/main.sh
+@@ -0,0 +1,8 @@
++#!/bin/sh
++export VIRTUAL_ENV=/app/.venv
++
++python3 -m venv $VIRTUAL_ENV
++
++export PATH="$VIRTUAL_ENV/bin:$PATH"
++
++python3 /app/main.py
+diff --git a/requirements-dev.txt b/requirements-dev.txt
+deleted file mode 100644
+index 0fa58d7..0000000
+--- a/requirements-dev.txt
++++ /dev/null
+@@ -1,6 +0,0 @@
+-pre-commit
+-black
+-mypy
+-ruff
+-pytest
+-types-pyyaml
+diff --git a/requirements.txt b/requirements.txt
+deleted file mode 100644
+index c3726e8..0000000
+--- a/requirements.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-pyyaml
+-- 
+2.46.0
+

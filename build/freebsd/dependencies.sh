@@ -1,0 +1,88 @@
+#!/bin/bash
+
+export BSD_QT5_DEPS="\
+    avahi-app \
+    consolekit2 \
+    dbus \
+    double-conversion \
+    fftw3 \
+    fftw3-float \
+    fontconfig\
+    freetype2 \
+    gettext-runtime \
+    giflib \
+    glib \
+    icu \
+    iso-codes \
+    jpeg-turbo \
+    lcms2 \
+    libedit \
+    libGLU \
+    libICE \
+    libSM \
+    libX11 \
+    libXext \
+    libXtst \
+    libXv \
+    libglvnd \
+    libinotify \
+    libltdl \
+    libmysofa \
+    libsndfile \
+    libsoxr \
+    libunwind \
+    libxcb \
+    libxml2 \
+    lua53 \
+    orc \
+    pcre2 \
+    perl5 \
+    png \
+    python311 \
+    speexdsp \
+    sqlite \
+    sqlite3 \
+    tiff \
+    webrtc-audio-processing0 \
+    xdg-utils \
+    xorg-fonts-truetype \
+    zstd \
+"
+
+export BSD_QT6_DEPS="\
+    at-spi2-core \
+    cairo \
+    cups \
+    gdk-pixbuf2 \
+    graphite2 \
+    gtk3 \
+    libXau \
+    libXcomposite \
+    libXcursor \
+    libXdamage \
+    libXdmcp \
+    libXext \
+    libXi \
+    libXinerama \
+    libXrandr \
+    libXrender \
+    libdrm \
+    libevdev \
+    libglvnd \
+    libinput \
+    libmtdev \
+    libudev-devd \
+    libxkbcommon \
+    pango \
+    pcre2 \
+    perl5 \
+    pixman \
+    png \
+    vulkan-loader \
+    wayland \
+    xcb-util-cursor \
+    xcb-util-image \
+    xcb-util-keysyms \
+    xcb-util-renderutil \
+    xcb-util-wm \
+"
