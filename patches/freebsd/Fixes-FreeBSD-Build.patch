@@ -1,0 +1,77 @@
+From b516895c50a5a3a1d98f3f2d8296755ea15b9540 Mon Sep 17 00:00:00 2001
+From: Brad D <social@brandongrows.me>
+Date: Thu, 29 Aug 2024 05:10:57 -0500
+Subject: [PATCH] Fixes: FreeBSD Build
+
+---
+ include/compat/freebsd/dirent.h | 7 +++++++
+ src/file.cpp                    | 1 +
+ src/mutex.cpp                   | 1 +
+ src/os.cpp                      | 1 +
+ src/thread.cpp                  | 1 +
+ 5 files changed, 11 insertions(+)
+
+diff --git a/include/compat/freebsd/dirent.h b/include/compat/freebsd/dirent.h
+index b4f586b..d7f264d 100644
+--- a/include/compat/freebsd/dirent.h
++++ b/include/compat/freebsd/dirent.h
+@@ -1 +1,8 @@
++// For PS4, PS5 and BSD to be supported properly
++#include <sys/param.h>
++
++#if __FreeBSD_version <= 1300000
+ #include <sys/dirent.h>
++#else
++#include "/usr/include/dirent.h"
++#endif
+diff --git a/src/file.cpp b/src/file.cpp
+index 1ed80a0..c9d17b6 100644
+--- a/src/file.cpp
++++ b/src/file.cpp
+@@ -75,6 +75,7 @@ namespace bx
+ 	  || BX_PLATFORM_EMSCRIPTEN \
+ 	  || BX_PLATFORM_IOS        \
+ 	  || BX_PLATFORM_OSX        \
++	  || BX_PLATFORM_BSD		\
+ 	  || BX_PLATFORM_VISIONOS
+ #		define fseeko64 fseeko
+ #		define ftello64 ftello
+diff --git a/src/mutex.cpp b/src/mutex.cpp
+index a29134c..b326909 100644
+--- a/src/mutex.cpp
++++ b/src/mutex.cpp
+@@ -12,6 +12,7 @@
+ #	include <bx/crt0.h>
+ #elif  BX_PLATFORM_ANDROID \
+ 	|| BX_PLATFORM_LINUX   \
++	|| BX_PLATFORM_BSD	   \
+ 	|| BX_PLATFORM_IOS     \
+ 	|| BX_PLATFORM_OSX     \
+ 	|| BX_PLATFORM_PS4     \
+diff --git a/src/os.cpp b/src/os.cpp
+index c517bf2..2fc8475 100644
+--- a/src/os.cpp
++++ b/src/os.cpp
+@@ -23,6 +23,7 @@
+ 	|| BX_PLATFORM_EMSCRIPTEN \
+ 	|| BX_PLATFORM_IOS        \
+ 	|| BX_PLATFORM_LINUX      \
++	|| BX_PLATFORM_BSD		  \
+ 	|| BX_PLATFORM_NX         \
+ 	|| BX_PLATFORM_OSX        \
+ 	|| BX_PLATFORM_PS4        \
+diff --git a/src/thread.cpp b/src/thread.cpp
+index 94cb2a4..a5c40da 100644
+--- a/src/thread.cpp
++++ b/src/thread.cpp
+@@ -16,6 +16,7 @@
+ #	include <bx/crt0.h>
+ #elif  BX_PLATFORM_ANDROID \
+ 	|| BX_PLATFORM_LINUX   \
++	|| BX_PLATFORM_BSD	   \
+ 	|| BX_PLATFORM_IOS     \
+ 	|| BX_PLATFORM_OSX     \
+ 	|| BX_PLATFORM_PS4     \
+-- 
+2.46.0
+

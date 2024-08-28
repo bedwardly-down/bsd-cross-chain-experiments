@@ -39,15 +39,11 @@ env:
   PAYLOAD_HASH_SOURCE: 'payload.json'
   SOURCE_HASH_SOURCE: "patch.sh"
 
-  # QT variables
-  QT_VERSION: 5.15.2
-  QTCREATOR_VERSION: 11.0.3
-  QT_BUILD_FLAGS: "-optimized-qmake -opensource -nomake tests -nomake examples -confirm-license -ccache -release -optimize-size -silent -linker lld"
-  QT_MODULES: "qtbase,qtmultimedia,qtsvg,qtimageformats,qttools,qtxmlpatterns,qtdeclarative,qtquick3d,qtrepotools"
-
   # Compiler variables
   CLANG_VERSION: "17"
+  C_STANDARD_VERSION: "c17"
   CXX_STANDARD_VERSION: "c++17"
+  GCC_VERSION: "12"
 
 jobs:
   define:
@@ -74,9 +70,6 @@ jobs:
       id: deps
       run: >-
         echo "deps=[ \
-          'qt5', \
-          'qt6', \
-          'qtcreator', \
           'shared', \
           'thirdparty' \
         ]" >> "$GITHUB_OUTPUT"
@@ -85,10 +78,7 @@ jobs:
       id: sources
       run: >-
         echo "sources=[ \
-          'thirdparty', \
-          'qt5', \
-          'qt6', \
-          'qtcreator' \
+          'thirdparty' \
         ]" >> "$GITHUB_OUTPUT"
 
     - name: Define Builds
@@ -105,7 +95,8 @@ jobs:
         echo "stages=[ \
           'prepare', \
           'build', \
-          'sysroot' \
+          'sysroot', \
+          'engine' \
         ]" >> "$GITHUB_OUTPUT"
 
   matrix:
@@ -176,7 +167,8 @@ jobs:
         python3 get-pipenv.py
 
         pipenv install
-        pipenv install pyyaml>='6.0.2'
+        pipenv install pyyaml pipenv
+        pipenv run pipenv --version
 
     - name: Prepare setup-matrix
       id: setup
@@ -186,6 +178,8 @@ jobs:
         export TLD=$GITHUB_WORKSPACE
 
         cd ${{ env.SETUP_MATRIX_DIR }}
+
+        #sudo find /usr -type f -name "*crt*.o" -prune -exec du -h '{}' \;
 
         # Patch Dockerfile so that it uses the cache and pipenv
         patch -p1 -i $TLD/cross/patches/workflows/setup-matrix-github-actions-fix.patch
@@ -201,14 +195,11 @@ jobs:
       uses: ./_actions/druzsan/setup-matrix/v2
       with:
         matrix: |
-          source: 
-            - qt5
-            - qt6
-            - qtcreator
           dep:
             - shared
             - thirdparty
           include:
+            - source: thirdparty
             - stage: prepare
 
     - name: Prepare ${{ matrix.stage }} Matrix
@@ -233,19 +224,54 @@ jobs:
       uses: ./_actions/druzsan/setup-matrix/v2
       with:
         matrix: |
-          source: 
-            - qt5 
-            - qt6 
-            - qtcreator
-            - thirdparty
-          build:
-            - static
-            - dynamic
-          platform:
-            - freebsd
-            - linux
           include:
-            - dep: shared
+            - platform: linux
+              version: 22.04
+              build: static
+              dep: shared
+              source: thirdparty
+              stage: build
+            - platform: linux
+              version: 22.04
+              build: dynamic
+              dep: shared
+              source: thirdparty
+              stage: build
+            - platform: freebsd
+              version: 14.1
+              build: static
+              dep: shared
+              source: thirdparty
+              stage: build
+            - platform: freebsd
+              version: 14.1
+              build: dynamic
+              dep: shared
+              source: thirdparty
+              stage: build
+            - platform: freebsd
+              version: 14.0
+              build: static
+              dep: shared
+              source: thirdparty
+              stage: build
+            - platform: freebsd
+              version: 14.0
+              build: dynamic
+              dep: shared
+              source: thirdparty
+              stage: build
+            - platform: freebsd
+              version: 13.3
+              build: static
+              dep: shared
+              source: thirdparty
+              stage: build
+            - platform: freebsd
+              version: 13.3
+              build: dynamic
+              dep: shared
+              source: thirdparty
               stage: build
 
     # Will add FreeBSD back to this once I get the sysroot stuff working properly again
@@ -258,12 +284,34 @@ jobs:
       with:
         matrix: |
           include:
-            - dep: thirdparty
+            - platform: linux
+              version: 22.04
+              dep: thirdparty
               source: thirdparty
               shared: shared
               build: static
               stage: build
-              platform: linux
+            - platform: freebsd
+              version: 14.1
+              dep: thirdparty
+              source: thirdparty
+              shared: shared
+              build: static
+              stage: build
+            - platform: freebsd
+              version: 14.0
+              dep: thirdparty
+              source: thirdparty
+              shared: shared
+              build: static
+              stage: build
+            - platform: freebsd
+              version: 13.3
+              dep: thirdparty
+              source: thirdparty
+              shared: shared
+              build: static
+              stage: build
 
     - name: Prepare ${{ matrix.stage }} ${{ matrix.build }} Matrix
       id: build_static
@@ -273,20 +321,28 @@ jobs:
       uses: ./_actions/druzsan/setup-matrix/v2
       with:
         matrix: |
-          source: 
-            - qt5 
-            - qt6 
-            - qtcreator
-          platform:
-            - linux
-            - freebsd
-          version:
-            - 22.04
-            - 14.1
-            - 14.0
-            - 13.3
           include:
-            - dep: shared
+            - platform: linux
+              version: 22.04
+              dep: shared
+              link: thirdparty
+              build: static
+              stage: build
+            - platform: freebsd
+              version: 14.1
+              dep: shared
+              link: thirdparty
+              build: static
+              stage: build
+            - platform: freebsd
+              version: 14.0
+              dep: shared
+              link: thirdparty
+              build: static
+              stage: build
+            - platform: freebsd
+              version: 13.3
+              dep: shared
               link: thirdparty
               build: static
               stage: build
@@ -299,19 +355,28 @@ jobs:
       uses: ./_actions/druzsan/setup-matrix/v2
       with:
         matrix: |
-          source: 
-            - qt5 
-            - qt6 
-            - qtcreator
-          platform:
-            - linux
-            - freebsd
-          version:
-            - 22.04
-            - 14.1
-            - 13.3
           include:
-            - dep: shared
+            - platform: linux
+              version: 22.04
+              dep: shared
+              link: static
+              build: dynamic
+              stage: build
+            - platform: freebsd
+              version: 14.1
+              dep: shared
+              link: static
+              build: dynamic
+              stage: build
+            - platform: freebsd
+              version: 14.0
+              dep: shared
+              link: static
+              build: dynamic
+              stage: build
+            - platform: freebsd
+              version: 13.3
+              dep: shared
               link: static
               build: dynamic
               stage: build
@@ -322,15 +387,22 @@ jobs:
       uses: ./_actions/druzsan/setup-matrix/v2
       with:
         matrix: |
-          platform:
-            - freebsd
-            - linux
-          version:
-            - 22.04
-            - 14.1
-            - 13.3
           include:
-            - stage: cross
+            - platform: linux
+              version: 22.04
+              link: dynamic
+              stage: cross
+            - platform: freebsd
+              version: 14.1
+              link: dynamic
+              stage: cross
+            - platform: freebsd
+              version: 14.0
+              stage: cross
+            - platform: freebsd
+              version: 13.3
+              link: dynamic
+              stage: cross
 
     - name: Cache Python
       id: pycache
@@ -356,15 +428,9 @@ jobs:
         dep: ${{ fromJSON(needs.define.outputs.deps) }}
 
     outputs:
-      deps_dir_qt5: ${{ steps.define.outputs.deps_dir_qt5 }}
-      deps_dir_qt6: ${{ steps.define.outputs.deps_dir_qt6 }}
-      deps_dir_qtcreator: ${{ steps.define.outputs.deps_dir_qtcreator }}
       deps_dir_shared: ${{ steps.define.outputs.deps_dir_shared }}
       deps_dir_thirdparty: ${{ steps.define.outputs.deps_dir_thirdparty }}
 
-      deps_key_qt5: ${{ steps.define.outputs.deps_key_qt5 }}
-      deps_key_qt6: ${{ steps.define.outputs.deps_key_qt6 }}
-      deps_key_qtcreator: ${{ steps.define.outputs.deps_key_qtcreator }}
       deps_key_shared: ${{ steps.define.outputs.deps_key_shared }}
       deps_key_thirdparty: ${{ steps.define.outputs.deps_key_thirdparty }}
 
@@ -386,7 +452,7 @@ jobs:
         mkdir -pv ${{ env.DEPS_DIR }}
         cp -rfv cross/build/source/${{ env.DEPS_HASH_SOURCE }} ${{ env.DEPS_DIR }}
 
-        export DEPS_HASH=${{ hashFiles(format('**/{0}', env.DEPS_HASH_SOURCE)) }}
+        export DEPS_HASH=${{ hashFiles(format('**/source/{0}', env.DEPS_HASH_SOURCE)) }}
         export DEPS_KEY="${{ matrix.dep }}-deps-$DEPS_HASH"
 
         echo 'deps_dir_${{ matrix.dep }}=${{ env.DEPS_DIR }}' >> "$GITHUB_OUTPUT"
@@ -405,7 +471,7 @@ jobs:
         path: |
           ${{ steps.define.outputs.deps_dir }}
         key: ${{ steps.define.outputs.deps_key }}
-        lookup-only: trueunderscore regex
+        lookup-only: true
 
     - name: Prepare Apt Sources
       id: apt
@@ -473,26 +539,17 @@ jobs:
       matrix:
         source: ${{ fromJSON(needs.define.outputs.sources) }}
         include:
-          - alsa: 'v1.2.12'
-            gstreamer: '1.24.7'
-            ijg: 'jpeg-9f'
-            jasper: 'version-4.2.4'
-            openal: '1.23.1'
-            pulseaudio: 'v16.1'
-            qt5: '5.15.2'
-            qt6: '6.7.2'
-            qtcreator: '12.0.2'
-            webp: 'v1.4.0'
+          - glfw: '3.4'
+            bimg: 'master'
+            bx: 'master'
+            bgfx: 'master'
+            genie: 'master'
+            mimalloc: 'v2.1.7'
+            soloud: 'master'
 
     outputs:
-      source_dir_qt5: ${{ steps.link.outputs.source_dir_qt5 }}
-      source_dir_qt6: ${{ steps.link.outputs.source_dir_qt6 }}
-      source_dir_qtcreator: ${{ steps.link.outputs.source_dir_qtcreator }}
       source_dir_thirdparty: ${{ steps.link.outputs.source_dir_thirdparty }}
 
-      source_key_qt5: ${{ steps.define.outputs.source_key_qt5 }}
-      source_key_qt6: ${{ steps.define.outputs.source_key_qt6 }}
-      source_key_qtcreator: ${{ steps.define.outputs.source_key_qtcreator }}
       source_key_thirdparty: ${{ steps.define.outputs.source_key_thirdparty }}
 
       source_hash: ${{ steps.define.outputs.source_hash }}
@@ -526,24 +583,8 @@ jobs:
     - name: Link Versions to Source
       id: link
       run: |
-        if [[ "${{ matrix.source }}" == "qt5" ]]; then
-          echo 'url=https://code.qt.io/cgit' >> "$GITHUB_OUTPUT"
-          echo 'version=v${{ matrix.qt5 }}' >> "$GITHUB_OUTPUT"
-          echo 'repo=qt/qt5.git' >> "$GITHUB_OUTPUT"
-          echo 'submodules=' >> "$GITHUB_OUTPUT"
-        elif [[ "${{ matrix.source }}" == "qt6" ]]; then
-          echo 'url=https://code.qt.io/cgit' >> "$GITHUB_OUTPUT"
-          echo 'version=v${{ matrix.qt6 }}' >> "$GITHUB_OUTPUT"
-          echo 'repo=qt/qt5.git' >> "$GITHUB_OUTPUT"
-          echo 'submodules=' >> "$GITHUB_OUTPUT"
-        elif [[ "${{ matrix.source }}" == "qtcreator" ]]; then
-          echo 'url=https://code.qt.io/cgit' >> "$GITHUB_OUTPUT"
-          echo 'version=v${{ matrix.qtcreator }}' >> "$GITHUB_OUTPUT"
-          echo 'repo=qt-creator/qt-creator.git' >> "$GITHUB_OUTPUT"
-          echo 'submodules=recursive' >> "$GITHUB_OUTPUT"
-        fi
         echo 'source=${{ matrix.source }}' >> "$GITHUB_OUTPUT"
-        echo "source_dir_${{ matrix.source }}=${{ env.SOURCE_DIR }}/$SOURCE_DIR" >> "$GITHUB_OUTPUT"
+        echo 'source_dir_${{ matrix.source }}=${{ env.SOURCE_DIR }}/${{ matrix.source }}' >> "$GITHUB_OUTPUT"
         echo 'source_dir=${{ env.SOURCE_DIR }}/${{ matrix.source }}' >> "$GITHUB_OUTPUT"
 
     - name: Load ${{ matrix.source }} Source cache
@@ -556,19 +597,6 @@ jobs:
         lookup-only: true
 
     - name: Checkout ${{ matrix.source }} from git
-      id: git
-      if: |
-        steps.load.outputs.cache-hit != 'true' &&
-        matrix.source != 'thirdparty'
-      uses: actions/checkout@v4
-      with:
-        github-server-url: '${{ steps.link.outputs.url }}'
-        repository: '${{ steps.link.outputs.repo }}'
-        path: '${{ steps.link.outputs.source_dir }}'
-        ref: '${{ steps.link.outputs.version }}'
-        submodules: '${{ steps.link.outputs.submodules }}'
-
-    - name: Checkout ${{ matrix.source }} from git
       id: thirdparty
       if: |
         steps.load.outputs.cache-hit != 'true' &&
@@ -577,54 +605,22 @@ jobs:
         mkdir -pv ${{ steps.link.outputs.source_dir }}
         cd ${{ steps.link.outputs.source_dir }}
 
-        # Alsa-lib
-        git clone --recursive --branch ${{ matrix.alsa }} --depth 1 https://github.com/alsa-project/alsa-lib.git alsa
+        # BGFX
+        git clone --recursive --branch ${{ matrix.bimg }} --depth 1 https://github.com/bkaradzic/bimg.git bimg
+        git clone --recursive --branch ${{ matrix.bx }} --depth 1 https://github.com/bkaradzic/bx.git bx
+        git clone --recursive --branch ${{ matrix.bgfx }} --depth 1 https://github.com/bkaradzic/bgfx.git bgfx
 
-        # Gstreamer-1.0
-        git clone --recursive --branch ${{ matrix.gstreamer }} --depth 1 https://gitlab.freedesktop.org/gstreamer/gstreamer.git
+        # Genie
+        git clone --recursive --branch ${{ matrix.genie }} --depth 1 https://github.com/bkaradzic/GENie.git genie
 
-        # IJG (Required Jasper dependency)
-        git clone --recursive --branch ${{ matrix.ijg }} --depth 1 https://github.com/libjpeg-turbo/ijg.git
+        # GLFW
+        git clone --recursive --branch ${{ matrix.glfw }} --depth 1 https://github.com/glfw/glfw.git glfw
 
-        # Jasper
-        git clone --recursive --branch ${{ matrix.jasper }} --depth 1 https://github.com/jasper-software/jasper.git
+        # Mimalloc
+        git clone --recursive --branch ${{ matrix.mimalloc }} --depth 1 https://github.com/microsoft/mimalloc.git mimalloc
 
-        # Openal-soft
-        git clone --recursive --branch ${{ matrix.openal }} --depth 1 https://github.com/kcat/openal-soft.git openal
-
-        # Pulseaudio
-        git clone --recursive --branch ${{ matrix.pulseaudio }} --depth 1 https://gitlab.freedesktop.org/pulseaudio/pulseaudio.git
-
-    - name: Checkout ${{ matrix.source }} submodules from git
-      id: submodule
-      if: |
-        steps.load.outputs.cache-hit != 'true' &&
-        matrix.source != 'thirdparty'
-      run: |
-        export TLD=$GITHUB_WORKSPACE
-        export SOURCE_DIR=${{ steps.link.outputs.source_dir }}
-
-        cd $TLD/$SOURCE_DIR
-
-        if [[ "${{ matrix.source }}" == "qt5" ]]; then
-          MODULES="qtgraphicaleffects,qtquickcontrols2"
-          perl init-repository -f --module-subset="${{ env.QT_MODULES }},$MODULES"
-          cd qtbase
-
-          # Apply any source specific patches here
-          patch -p1 -i $TLD/cross/patches/source/${{ matrix.source }}-fixes.patch
-        elif [[ "${{ matrix.source }}" == "qt6" ]]; then
-          MODULES="qt5compat,qtshadertools,qtquicktimeline"
-          perl init-repository -f --module-subset="${{ env.QT_MODULES }},$MODULES"
-
-          cd qtbase
-          patch -p1 -i $TLD/cross/patches/source/${{ matrix.source }}-fixes.patch
-        elif [[ "${{ matrix.source }}" == "qtcreator" ]]; then
-          patch -p1 -i $TLD/cross/patches/source/${{ matrix.source }}-fixes.patch
-        fi
-
-        cd $TLD
-        echo "Submodules downloaded"
+        # Soloud
+        git clone --recursive --branch ${{ matrix.soloud }} --depth 1 https://github.com/jarikomppa/soloud.git soloud
 
     - name: Cache ${{ matrix.source }} Source
       id: cache
@@ -647,26 +643,14 @@ jobs:
     outputs:
       prepare_json: ${{ steps.define.outputs.prepare_json }}
 
-      deps_dir_qt5: ${{ needs.deps.outputs.deps_dir_qt5 }}
-      deps_dir_qt6: ${{ needs.deps.outputs.deps_dir_qt6 }}
-      deps_dir_qtcreator: ${{ needs.deps.outputs.deps_dir_qtcreator }}
       deps_dir_shared: ${{ needs.deps.outputs.deps_dir_shared }}
       deps_dir_thirdparty: ${{ needs.deps.outputs.deps_dir_thirdparty }}
 
-      deps_key_qt5: ${{ needs.deps.outputs.deps_key_qt5 }}
-      deps_key_qt6: ${{ needs.deps.outputs.deps_key_qt6 }}
-      deps_key_qtcreator: ${{ needs.deps.outputs.deps_key_qtcreator }}
       deps_key_shared: ${{ needs.deps.outputs.deps_key_shared }}
       deps_key_thirdparty: ${{ needs.deps.outputs.deps_key_thirdparty }}
 
-      source_dir_qt5: ${{ needs.source.outputs.source_dir_qt5 }}
-      source_dir_qt6: ${{ needs.source.outputs.source_dir_qt6 }}
-      source_dir_qtcreator: ${{ needs.source.outputs.source_dir_qtcreator }}
       source_dir_thirdparty: ${{ needs.source.outputs.source_dir_thirdparty }}
 
-      source_key_qt5: ${{ needs.source.outputs.source_key_qt5 }}
-      source_key_qt6: ${{ needs.source.outputs.source_key_qt6 }}
-      source_key_qtcreator: ${{ needs.source.outputs.source_key_qtcreator }}
       source_key_thirdparty: ${{ needs.source.outputs.source_key_thirdparty }}
 
     steps:
@@ -713,14 +697,20 @@ jobs:
       matrix: ${{ fromJSON(needs.matrix.outputs.matrix_sysroot) }}
 
     outputs:
-      cross_host_freebsd_14: ${{ steps.cache.outputs.cross_host_freebsd_14 }}
-      cross_host_freebsd_13: ${{ steps.cache.outputs.cross_host_freebsd_13 }}
+      cross_host_freebsd_14_1: ${{ steps.key.outputs.cross_host_freebsd_14_1 }}
+      cross_host_freebsd_14_0: ${{ steps.key.outputs.cross_host_freebsd_14_0 }}
 
-      sysroot_dir_freebsd_14: ${{ steps.define.outputs.sysroot_dir_freebsd_14 }}
-      sysroot_dir_freebsd_13: ${{ steps.define.outputs.sysroot_dir_freebsd_13 }}
+      cross_host_freebsd_13_3: ${{ steps.key.outputs.cross_host_freebsd_13_3 }}
 
-      sysroot_key_freebsd_14: ${{ steps.key.outputs.sysroot_key_freebsd_14 }}
-      sysroot_key_freebsd_13: ${{ steps.key.outputs.sysroot_key_freebsd_13 }}
+      sysroot_dir_freebsd_14_1: ${{ steps.define.outputs.sysroot_dir_freebsd_14_1 }}
+      sysroot_dir_freebsd_14_0: ${{ steps.define.outputs.sysroot_dir_freebsd_14_0 }}
+
+      sysroot_dir_freebsd_13_3: ${{ steps.define.outputs.sysroot_dir_freebsd_13_3 }}
+
+      sysroot_key_freebsd_14_1: ${{ steps.key.outputs.sysroot_key_freebsd_14_1 }}
+      sysroot_key_freebsd_14_0: ${{ steps.key.outputs.sysroot_key_freebsd_14_0 }}
+
+      sysroot_key_freebsd_13_3: ${{ steps.key.outputs.sysroot_key_freebsd_13_3 }}
 
     steps:
     - name: Checkout repository
@@ -737,25 +727,25 @@ jobs:
       run: |
         mkdir -pv ${{ env.SYSROOT_DIR }}
         cp -rfv ${{ env.BSD_DEPS_SCRIPT }} ${{ env.SYSROOT_DIR }}
+        
+        export VERSION=`echo ${{ matrix.version }} | sed -e "s@\.@_@"`
 
-        echo 'sysroot_dir_${{ matrix.platform }}_${{ matrix.version }}=${{ env.SYSROOT_DIR }}' >> "$GITHUB_OUTPUT"
+        echo "sysroot_dir_${{ matrix.platform }}_$VERSION=${{ env.SYSROOT_DIR }}" >> "$GITHUB_OUTPUT"
         echo 'sysroot_dir=${{ env.SYSROOT_DIR }}' >> "$GITHUB_OUTPUT"
 
     - name: Prepare ${{ matrix.platform }} Sysroot
       id: key
       env:
-        SYSROOT_HASH: "${{ hashFiles(format('**/{0}', env.DEPS_HASH_SOURCE )) }}"
+        SYSROOT_HASH: "${{ hashFiles(format('**/freebsd/{0}', env.DEPS_HASH_SOURCE )) }}"
         SYSROOT_KEY: "${{ matrix.platform }}-${{ matrix.version }}-sysroot"
       run: |
-        if [[ "${{ contains(format('{0}', matrix.version), '14') }}" == "true" ]]; then
-          echo 'sysroot_key_${{ matrix.platform }}_14=${{ env.SYSROOT_KEY }}-${{ env.SYSROOT_HASH }}' >> "$GITHUB_OUTPUT"
-          echo 'cross_host_${{ matrix.platform }}_14=x86_64-unknown-${{ matrix.platform }}${{ matrix.version }}' >> "$GITHUB_OUTPUT"
-        elif [[ "${{ contains(format('{0}', matrix.version), '13') }}" == "true" ]]; then
-          echo 'sysroot_key_${{ matrix.platform }}_13=${{ env.SYSROOT_KEY }}-${{ env.SYSROOT_HASH }}' >> "$GITHUB_OUTPUT"
-          echo 'cross_host_${{ matrix.platform }}_13=x86_64-unknown-${{ matrix.platform }}${{ matrix.version }}' >> "$GITHUB_OUTPUT"
-        fi
+        export VERSION=`echo ${{ matrix.version }} | sed -e "s@\.@_@"`
 
+        echo "sysroot_key_${{ matrix.platform }}_$VERSION=${{ env.SYSROOT_KEY }}-${{ env.SYSROOT_HASH }}" >> "$GITHUB_OUTPUT"
         echo 'sysroot_key=${{ env.SYSROOT_KEY }}-${{ env.SYSROOT_HASH }}' >> "$GITHUB_OUTPUT"
+
+        echo "cross_host_${{ matrix.platform }}_$VERSION=x86_64-unknown-${{ matrix.platform }}${{ matrix.version }}" >> "$GITHUB_OUTPUT"
+        echo 'cross_host=x86_64-unknown-${{ matrix.platform }}${{ matrix.version }}' >> "$GITHUB_OUTPUT"
 
     - name: Load ${{ matrix.stage }} cache
       id: load
@@ -791,8 +781,7 @@ jobs:
 
         source $TLD/${{ env.BSD_DEPS_SCRIPT }}
 
-        echo "bsd_qt5_deps=$BSD_QT5_DEPS" >> "$GITHUB_OUTPUT"
-        echo "bsd_qt6_deps=$BSD_QT6_DEPS" >> "$GITHUB_OUTPUT"
+        echo "bsd_thirdparty_deps=$BSD_THIRDPARTY_DEPS" >> "$GITHUB_OUTPUT"
 
     # Uses https://github.com/ClickHouse/sysroot/tree/master/freebsd-x86_64 as a guide for minimal sysroot
     - name: Create FreeBSD Sysroot
@@ -816,7 +805,7 @@ jobs:
           # Grab required libraries
           pkg bootstrap -f -y
           pkg update
-          pkg install -y ${{ steps.runner.outputs.bsd_qt5_deps }} ${{ steps.runner.outputs.bsd_qt6_deps }}
+          pkg install -y llvm${{ env.CLANG_VERSION }}-lite gcc${{ env.GCC_VERSION }} ${{ steps.runner.outputs.bsd_thirdparty_deps }}
 
           # Copy libraries to sysroot
           cp -rf /usr/local usr
@@ -893,189 +882,126 @@ jobs:
       matrix: ${{ fromJSON(needs.matrix.outputs.matrix_build) }}
 
     env:
-      BUILD_CCACHE: "${{ matrix.platform }}/${{ matrix.version }}/${{ matrix.source }}/${{ matrix.build }}"
+      BUILD_CCACHE: "${{ matrix.platform }}/${{ matrix.version }}${{ matrix.build }}/${{ matrix.source }}"
 
     outputs:
       # ccache specific shared variables
       ccache_compress: ${{ steps.define.outputs.ccache_compress }}
       ccache_compresslevel: ${{ steps.define.outputs.ccache_compresslevel }}
       ccache_maxsize: ${{ steps.define.outputs.ccache_maxsize }}
-      ccache_cmake_cflags: ${{ steps.define.outputs.ccache_cmake_cflags }}
-      ccache_cmake_cxxflags: ${{ steps.define.outputs.ccache_cmake_cxxflags }}
+      ccache_cmake_build_cflags: ${{ steps.define.outputs.ccache_cmake_build_cflags }}
+      ccache_cmake_build_cxxflags: ${{ steps.define.outputs.ccache_cmake_build_cxxflags }}
       ccache_sloppiness: ${{ steps.define.outputs.ccache_sloppiness }}
 
-      ccache_dir_static_linux_22_qt5: ${{ steps.cache.outputs.ccache_dir_static_linux_qt5 }}
-      ccache_dir_static_linux_22_qt6: ${{ steps.cache.outputs.ccache_dir_static_linux_qt6 }}
-      ccache_dir_static_linux_22_qtcreator: ${{ steps.cache.outputs.ccache_dir_static_linux_qtcreator }}
-      ccache_dir_static_linux_22_thirdparty: ${{ steps.cache.outputs.ccache_dir_static_linux_thirdparty }}
+      ccache_dir_static_linux_22_04_thirdparty: ${{ steps.cache.outputs.ccache_dir_static_linux_22_04_thirdparty }}
 
-      ccache_dir_static_freebsd_14_qt5: ${{ steps.cache.outputs.ccache_dir_static_freebsd_14_qt5 }}
-      ccache_dir_static_freebsd_14_qt6: ${{ steps.cache.outputs.ccache_dir_static_freebsd_14_qt6 }}
-      ccache_dir_static_freebsd_14_qtcreator: ${{ steps.cache.outputs.ccache_dir_static_freebsd_14_qtcreator }}
-      ccache_dir_static_freebsd_14_thirdparty: ${{ steps.cache.outputs.ccache_dir_static_freebsd_14_thirdparty }}
+      ccache_dir_static_freebsd_14_1_thirdparty: ${{ steps.cache.outputs.ccache_dir_static_freebsd_14_1_thirdparty }}
+      ccache_dir_static_freebsd_14_0_thirdparty: ${{ steps.cache.outputs.ccache_dir_static_freebsd_14_0_thirdparty }}
 
-      ccache_dir_static_freebsd_13_qt5: ${{ steps.cache.outputs.ccache_dir_static_freebsd_13_qt5 }}
-      ccache_dir_static_freebsd_13_qt6: ${{ steps.cache.outputs.ccache_dir_static_freebsd_13_qt6 }}
-      ccache_dir_static_freebsd_13_qtcreator: ${{ steps.cache.outputs.ccache_dir_static_freebsd_13_qtcreator }}
-      ccache_dir_static_freebsd_13_thirdparty: ${{ steps.cache.outputs.ccache_dir_static_freebsd_13_thirdparty }}
+      ccache_dir_static_freebsd_13_3_thirdparty: ${{ steps.cache.outputs.ccache_dir_static_freebsd_13_3_thirdparty }}
 
-      ccache_dir_dynamic_linux_22_qt5: ${{ steps.cache.outputs.ccache_dir_dynamic_linux_qt5 }}
-      ccache_dir_dynamic_linux_22_qt6: ${{ steps.cache.outputs.ccache_dir_dynamic_linux_qt6 }}
-      ccache_dir_dynamic_linux_22_qtcreator: ${{ steps.cache.outputs.ccache_dir_dynamic_linux_qtcreator }}
-      ccache_dir_dynamic_linux_22_thirdparty: ${{ steps.cache.outputs.ccache_dir_dynamic_linux_thirdparty }}
+      ccache_dir_dynamic_linux_22_04_thirdparty: ${{ steps.cache.outputs.ccache_dir_dynamic_linux_22_04_thirdparty }}
 
-      ccache_dir_dynamic_freebsd_14_qt5: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_14_qt5 }}
-      ccache_dir_dynamic_freebsd_14_qt6: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_14_qt6 }}
-      ccache_dir_dynamic_freebsd_14_qtcreator: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_14_qtcreator }}
-      ccache_dir_dynamic_freebsd_14_thirdparty: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_14_thirdparty }}
+      ccache_dir_dynamic_freebsd_14_1_thirdparty: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_14_1_thirdparty }}
+      ccache_dir_dynamic_freebsd_14_0_thirdparty: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_14_0_thirdparty }}
 
-      ccache_dir_dynamic_freebsd_13_qt5: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_13_qt5 }}
-      ccache_dir_dynamic_freebsd_13_qt6: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_13_qt6 }}
-      ccache_dir_dynamic_freebsd_13_qtcreator: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_13_qtcreator }}
-      ccache_dir_dynamic_freebsd_13_thirdparty: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_13_thirdparty }}
+      ccache_dir_dynamic_freebsd_13_3_thirdparty: ${{ steps.cache.outputs.ccache_dir_dynamic_freebsd_13_3_thirdparty }}
 
-      ccache_key_static_linux_22_qt5: ${{ steps.define.outputs.ccache_key_static_linux_qt5 }}
-      ccache_key_static_linux_22_qt6: ${{ steps.define.outputs.ccache_key_static_linux_qt6 }}
-      ccache_key_static_linux_22_qtcreator: ${{ steps.define.outputs.ccache_key_static_linux_qtcreator }}
-      ccache_key_static_linux_22_thirdparty: ${{ steps.define.outputs.ccache_key_static_linux_thirdparty }}
+      ccache_key_static_linux_22_04_thirdparty: ${{ steps.define.outputs.ccache_key_static_linux_22_04_thirdparty }}
 
-      ccache_key_static_freebsd_14_qt5: ${{ steps.define.outputs.ccache_key_static_freebsd_14_qt5 }}
-      ccache_key_static_freebsd_14_qt6: ${{ steps.define.outputs.ccache_key_static_freebsd_14_qt6 }}
-      ccache_key_static_freebsd_14_qtcreator: ${{ steps.define.outputs.ccache_key_static_freebsd_14_qtcreator }}
-      ccache_key_static_freebsd_14_thirdparty: ${{ steps.define.outputs.ccache_key_static_freebsd_14_thirdparty }}
+      ccache_key_static_freebsd_14_1_thirdparty: ${{ steps.define.outputs.ccache_key_static_freebsd_14_1_thirdparty }}
+      ccache_key_static_freebsd_14_0_thirdparty: ${{ steps.define.outputs.ccache_key_static_freebsd_14_0_thirdparty }}
 
-      ccache_key_static_freebsd_13_qt5: ${{ steps.define.outputs.ccache_key_static_freebsd_13_qt5 }}
-      ccache_key_static_freebsd_13_qt6: ${{ steps.define.outputs.ccache_key_static_freebsd_13_qt6 }}
-      ccache_key_static_freebsd_13_qtcreator: ${{ steps.define.outputs.ccache_key_static_freebsd_13_qtcreator }}
-      ccache_key_static_freebsd_13_thirdparty: ${{ steps.define.outputs.ccache_key_static_freebsd_13_thirdparty }}
+      ccache_key_static_freebsd_13_3_thirdparty: ${{ steps.define.outputs.ccache_key_static_freebsd_13_3_thirdparty }}
 
-      ccache_key_dynamic_linux_22_qt5: ${{ steps.define.outputs.ccache_key_dynamic_linux_qt5 }}
-      ccache_key_dynamic_linux_22_qt6: ${{ steps.define.outputs.ccache_key_dynamic_linux_qt6 }}
-      ccache_key_dynamic_linux_22_qtcreator: ${{ steps.define.outputs.ccache_key_dynamic_linux_qtcreator }}
-      ccache_key_dynamic_linux_22_thirdparty: ${{ steps.define.outputs.ccache_key_dynamic_linux_thirdparty }}
+      ccache_key_dynamic_linux_22_04_thirdparty: ${{ steps.define.outputs.ccache_key_dynamic_linux_22_04_thirdparty }}
 
-      ccache_key_dynamic_freebsd_14_qt5: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_14_qt5 }}
-      ccache_key_dynamic_freebsd_14_qt6: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_14_qt6 }}
-      ccache_key_dynamic_freebsd_14_qtcreator: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_14_qtcreator }}
-      ccache_key_dynamic_freebsd_14_thirdparty: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_14_thirdparty }}
+      ccache_key_dynamic_freebsd_14_1_thirdparty: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_14_1_thirdparty }}
+      ccache_key_dynamic_freebsd_14_0_thirdparty: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_14_0_thirdparty }}
 
-      ccache_key_dynamic_freebsd_13_qt5: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_13_qt5 }}
-      ccache_key_dynamic_freebsd_13_qt6: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_13_qt6 }}
-      ccache_key_dynamic_freebsd_13_qtcreator: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_13_qtcreator }}
-      ccache_key_dynamic_freebsd_13_thirdparty: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_13_thirdparty }}
+      ccache_key_dynamic_freebsd_13_3_thirdparty: ${{ steps.define.outputs.ccache_key_dynamic_freebsd_13_3_thirdparty }}
 
-      prefix_dir_static_linux_22_qt5: ${{ steps.define.outputs.prefix_dir_static_linux_qt5 }}
-      prefix_dir_static_linux_22_qt6: ${{ steps.define.outputs.prefix_dir_static_linux_qt6 }}
-      prefix_dir_static_linux_22_qtcreator: ${{ steps.define.outputs.prefix_dir_static_linux_qtcreator }}
-      prefix_dir_static_linux_22_thirdparty: ${{ steps.define.outputs.prefix_dir_static_linux_thirdparty }}
+      prefix_dir_static_linux_22_04_thirdparty: ${{ steps.define.outputs.prefix_dir_static_linux_22_04_thirdparty }}
 
-      prefix_key_static_linux_22_qt5: ${{ steps.define.outputs.prefix_key_static_linux_qt5 }}
-      prefix_key_static_linux_22_qt6: ${{ steps.define.outputs.prefix_key_static_linux_qt6 }}
-      prefix_key_static_linux_22_qtcreator: ${{ steps.define.outputs.prefix_key_static_linux_qtcreator }}
-      prefix_key_static_linux_22_thirdparty: ${{ steps.define.outputs.prefix_key_static_linux_thirdparty }}
+      prefix_key_static_linux_22_04_thirdparty: ${{ steps.define.outputs.prefix_key_static_linux_22_04_thirdparty }}
 
-      prefix_dir_static_freebsd_14_qt5: ${{ steps.define.outputs.prefix_dir_static_freebsd_14_qt5 }}
-      prefix_dir_static_freebsd_14_qt6: ${{ steps.define.outputs.prefix_dir_static_freebsd_14_qt6 }}
-      prefix_dir_static_freebsd_14_qtcreator: ${{ steps.define.outputs.prefix_dir_static_freebsd_14_qtcreator }}
-      prefix_dir_static_freebsd_14_thirdparty: ${{ steps.define.outputs.prefix_dir_static_freebsd_14_thirdparty }}
+      prefix_dir_static_freebsd_14_1_thirdparty: ${{ steps.define.outputs.prefix_dir_static_freebsd_14_1_thirdparty }}
+      prefix_dir_static_freebsd_14_0_thirdparty: ${{ steps.define.outputs.prefix_dir_static_freebsd_14_0_thirdparty }}
 
-      prefix_dir_static_freebsd_13_qt5: ${{ steps.define.outputs.prefix_dir_static_freebsd_13_qt5 }}
-      prefix_dir_static_freebsd_13_qt6: ${{ steps.define.outputs.prefix_dir_static_freebsd_13_qt6 }}
-      prefix_dir_static_freebsd_13_qtcreator: ${{ steps.define.outputs.prefix_dir_static_freebsd_13_qtcreator }}
-      prefix_dir_static_freebsd_13_thirdparty: ${{ steps.define.outputs.prefix_dir_static_freebsd_13_thirdparty }}
+      prefix_dir_static_freebsd_13_3_thirdparty: ${{ steps.define.outputs.prefix_dir_static_freebsd_13_3_thirdparty }}
 
-      prefix_key_static_freebsd_14_qt5: ${{ steps.define.outputs.prefix_key_static_freebsd_14_qt5 }}
-      prefix_key_static_freebsd_14_qt6: ${{ steps.define.outputs.prefix_key_static_freebsd_14_qt6 }}
-      prefix_key_static_freebsd_14_qtcreator: ${{ steps.define.outputs.prefix_key_static_freebsd_14_qtcreator }}
-      prefix_key_static_freebsd_14_thirdparty: ${{ steps.define.outputs.prefix_key_static_freebsd_14_thirdparty }}
+      prefix_key_static_freebsd_14_1_thirdparty: ${{ steps.define.outputs.prefix_key_static_freebsd_14_1_thirdparty }}
+      prefix_key_static_freebsd_14_0_thirdparty: ${{ steps.define.outputs.prefix_key_static_freebsd_14_0_thirdparty }}
 
-      prefix_key_static_freebsd_13_qt5: ${{ steps.define.outputs.prefix_key_static_freebsd_13_qt5 }}
-      prefix_key_static_freebsd_13_qt6: ${{ steps.define.outputs.prefix_key_static_freebsd_13_qt6 }}
-      prefix_key_static_freebsd_13_qtcreator: ${{ steps.define.outputs.prefix_key_static_freebsd_13_qtcreator }}
-      prefix_key_static_freebsd_13_thirdparty: ${{ steps.define.outputs.prefix_key_static_freebsd_13_thirdparty }}
+      prefix_key_static_freebsd_13_3_thirdparty: ${{ steps.define.outputs.prefix_key_static_freebsd_13_3_thirdparty }}
 
-      prefix_dir_dynamic_linux_22_qt5: ${{ steps.define.outputs.prefix_dir_dynamic_linux_qt5 }}
-      prefix_dir_dynamic_linux_22_qt6: ${{ steps.define.outputs.prefix_dir_dynamic_linux_qt6 }}
-      prefix_dir_dynamic_linux_22_qtcreator: ${{ steps.define.outputs.prefix_dir_dynamic_linux_qtcreator }}
-      prefix_dir_dynamic_linux_22_thirdparty: ${{ steps.define.outputs.prefix_dir_dynamic_linux_thirdparty }}
+      prefix_dir_dynamic_linux_22_04_thirdparty: ${{ steps.define.outputs.prefix_dir_dynamic_linux_22_04_thirdparty }}
 
-      prefix_key_dynamic_linux_22_qt5: ${{ steps.define.outputs.prefix_key_dynamic_linux_qt5 }}
-      prefix_key_dynamic_linux_22_qt6: ${{ steps.define.outputs.prefix_key_dynamic_linux_qt6 }}
-      prefix_key_dynamic_linux_22_qtcreator: ${{ steps.define.outputs.prefix_key_dynamic_linux_qtcreator }}
-      prefix_key_dynamic_linux_22_thirdparty: ${{ steps.define.outputs.prefix_key_dynamic_linux_thirdparty }}
+      prefix_key_dynamic_linux_22_04_thirdparty: ${{ steps.define.outputs.prefix_key_dynamic_linux_22_04_thirdparty }}
 
-      prefix_dir_dynamic_freebsd_14_qt5: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_14_qt5 }}
-      prefix_dir_dynamic_freebsd_14_qt6: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_14_qt6 }}
-      prefix_dir_dynamic_freebsd_14_qtcreator: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_14_qtcreator }}
-      prefix_dir_dynamic_freebsd_14_thirdparty: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_14_thirdparty }}
+      prefix_dir_dynamic_freebsd_14_1_thirdparty: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_14_1_thirdparty }}
+      prefix_dir_dynamic_freebsd_14_0_thirdparty: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_14_0_thirdparty }}
 
-      prefix_dir_dynamic_freebsd_13_qt5: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_13_qt5 }}
-      prefix_dir_dynamic_freebsd_13_qt6: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_13_qt6 }}
-      prefix_dir_dynamic_freebsd_13_qtcreator: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_13_qtcreator }}
-      prefix_dir_dynamic_freebsd_13_thirdparty: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_13_thirdparty }}
+      prefix_dir_dynamic_freebsd_13_3_thirdparty: ${{ steps.define.outputs.prefix_dir_dynamic_freebsd_13_3_thirdparty }}
 
-      prefix_key_dynamic_freebsd_14_qt5: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_14_qt5 }}
-      prefix_key_dynamic_freebsd_14_qt6: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_14_qt6 }}
-      prefix_key_dynamic_freebsd_14_qtcreator: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_14_qtcreator }}
-      prefix_key_dynamic_freebsd_14_thirdparty: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_14_thirdparty }}
+      prefix_key_dynamic_freebsd_14_1_thirdparty: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_14_1_thirdparty }}
+      prefix_key_dynamic_freebsd_14_0_thirdparty: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_14_0_thirdparty }}
 
-      prefix_key_dynamic_freebsd_13_qt5: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_13_qt5 }}
-      prefix_key_dynamic_freebsd_13_qt6: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_13_qt6 }}
-      prefix_key_dynamic_freebsd_13_qtcreator: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_13_qtcreator }}
-      prefix_key_dynamic_freebsd_13_thirdparty: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_13_thirdparty }}
+      prefix_key_dynamic_freebsd_13_3_thirdparty: ${{ steps.define.outputs.prefix_key_dynamic_freebsd_13_3_thirdparty }}
 
       pkg_config_path: ${{ steps.define.outputs.pkg_config_path }}
 
       # Platform specific outputs
       platform_name_linux: ${{ steps.platform.outputs.platform_name_linux }}
       system_version_linux: ${{ steps.platform.outputs.system_version_linux }}
-      cross_host_linux_22: ${{ steps.platform.outputs.cross_name_linux_ }}
+      cross_host_linux_22_04: ${{ steps.platform.outputs.cross_host_linux_22_04 }}
 
       platform_name_freebsd: ${{ steps.platform.outputs.platform_name_freebsd }}
       system_version_freebsd: ${{ steps.platform.outputs.system_version_freebsd }}
-      cross_host_freebsd_14: ${{ steps.platform.outputs.cross_host_freebsd_14 }}
-      cross_host_freebsd_13: ${{ steps.platform.outputs.cross_host_freebsd_13 }}
+      cross_host_freebsd_14_1: ${{ steps.platform.outputs.cross_host_freebsd_14_1 }}
+      cross_host_freebsd_14_0: ${{ steps.platform.outputs.cross_host_freebsd_14_0 }}
+      cross_host_freebsd_13_3: ${{ steps.platform.outputs.cross_host_freebsd_13_3 }}
 
-      cross_version_linux_22: ${{ steps.platform.outputs.cross_version_linux_ }}
-      cross_version_freebsd_14: ${{ steps.platform.outputs.cross_version_freebsd_14 }}
-      cross_version_freebsd_13: ${{ steps.platform.outputs.cross_version_freebsd_13 }}
+      cross_version_linux_22_04: ${{ steps.platform.outputs.cross_version_linux_22_04 }}
+      cross_version_freebsd_14_1: ${{ steps.platform.outputs.cross_version_freebsd_14_1 }}
+      cross_version_freebsd_14_0: ${{ steps.platform.outputs.cross_version_freebsd_14_0 }}
+      cross_version_freebsd_13_3: ${{ steps.platform.outputs.cross_version_freebsd_13_3 }}
+
+      # Sysroot outputs
+      sysroot_dir_linux_22_04: ${{ steps.platform.outputs.sysroot_dir_linux_22_04 }}
+      sysroot_dir_freebsd_14_1: ${{ steps.platform.outputs.sysroot_dir_freebsd_14_1 }}
+      sysroot_dir_freebsd_14_0: ${{ steps.platform.outputs.sysroot_dir_freebsd_14_0 }}
+      sysroot_dir_freebsd_13_3: ${{ steps.platform.outputs.sysroot_dir_freebsd_13_3 }}
+
+      sysroot_key_linux_22_04: ${{ steps.platform.outputs.sysroot_key_linux_22_04 }}
+      sysroot_key_freebsd_14_1: ${{ steps.platform.outputs.sysroot_key_freebsd_14_1 }}
+      sysroot_key_freebsd_14_0: ${{ steps.platform.outputs.sysroot_key_freebsd_14_0 }}
+      sysroot_key_freebsd_13_3: ${{ steps.platform.outputs.sysroot_key_freebsd_13_3 }}
 
       # Cmake outputs
       cmake_build_generator: ${{ steps.cmake.outputs.cmake_build_generator }}
       cmake_build_release: ${{ steps.cmake.outputs.cmake_build_release }}
       cmake_build_shared: ${{ steps.cmake.outputs.cmake_build_shared }}
       cmake_build_static: ${{ steps.cmake.outputs.cmake_build_static }}
+      cmake_build_c_flags: ${{ steps.cmake.outputs.cmake_build_c_flags }}
+      cmake_build_cxx_flags: ${{ steps.cmake.outputs.cmake_build_cxx_flags }}
+      cmake_build_c_linker: ${{ steps.cmake.outputs.cmake_build_c_linker }}
+      cmake_build_cxx_linker: ${{ steps.cmake.outputs.cmake_build_cxx_linker }}
 
       # Build outputs
-      build_dir_static_linux_qt5: ${{ steps.define.outputs.build_dir_static_linux_qt5 }}
-      build_dir_static_linux_qt6: ${{ steps.define.outputs.build_dir_static_linux_qt6 }}
-      build_dir_static_linux_qtcreator: ${{ steps.define.outputs.build_dir_static_linux_qtcreator }}
-      build_dir_static_linux_thirdparty: ${{ steps.define.outputs.build_dir_static_linux_thirdparty }}
+      build_dir_static_linux_22_04_thirdparty: ${{ steps.define.outputs.build_dir_static_linux_22_04_thirdparty }}
 
-      build_dir_static_freebsd_14_qt5: ${{ steps.define.outputs.build_dir_static_freebsd_14_qt5 }}
-      build_dir_static_freebsd_14_qt6: ${{ steps.define.outputs.build_dir_static_freebsd_14_qt6 }}
-      build_dir_static_freebsd_14_qtcreator: ${{ steps.define.outputs.build_dir_static_freebsd_14_qtcreator }}
-      build_dir_static_freebsd_14_thirdparty: ${{ steps.define.outputs.build_dir_static_freebsd_14_thirdparty }}
+      build_dir_static_freebsd_14_1_thirdparty: ${{ steps.define.outputs.build_dir_static_freebsd_14_1_thirdparty }}
+      build_dir_static_freebsd_14_0_thirdparty: ${{ steps.define.outputs.build_dir_static_freebsd_14_0_thirdparty }}
 
-      build_dir_static_freebsd_13_qt5: ${{ steps.define.outputs.build_dir_static_freebsd_13_qt5 }}
-      build_dir_static_freebsd_13_qt6: ${{ steps.define.outputs.build_dir_static_freebsd_13_qt6 }}
-      build_dir_static_freebsd_13_qtcreator: ${{ steps.define.outputs.build_dir_static_freebsd_13_qtcreator }}
-      build_dir_static_freebsd_13_thirdparty: ${{ steps.define.outputs.build_dir_static_freebsd_13_thirdparty }}
+      build_dir_static_freebsd_13_3_thirdparty: ${{ steps.define.outputs.build_dir_static_freebsd_13_3_thirdparty }}
 
-      build_dir_dynamic_linux_qt5: ${{ steps.define.outputs.build_dir_dynamic_linux_qt5 }}
-      build_dir_dynamic_linux_qt6: ${{ steps.define.outputs.build_dir_dynamic_linux_qt6 }}
-      build_dir_dynamic_linux_qtcreator: ${{ steps.define.outputs.build_dir_dynamic_linux_qtcreator }}
-      build_dir_dynamic_linux_thirdparty: ${{ steps.define.outputs.build_dir_dynamic_linux_thirdparty }}
+      build_dir_dynamic_linux_22_04_thirdparty: ${{ steps.define.outputs.build_dir_dynamic_linux_22_04_thirdparty }}
 
-      build_dir_dynamic_freebsd_14_qt5: ${{ steps.define.outputs.build_dir_dynamic_freebsd_14_qt5 }}
-      build_dir_dynamic_freebsd_14_qt6: ${{ steps.define.outputs.build_dir_dynamic_freebsd_14_qt6 }}
-      build_dir_dynamic_freebsd_14_qtcreator: ${{ steps.define.outputs.build_dir_dynamic_freebsd_14_qtcreator }}
-      build_dir_dynamic_freebsd_14_thirdparty: ${{ steps.define.outputs.build_dir_dynamic_freebsd_14_thirdparty }}
+      build_dir_dynamic_freebsd_14_1_thirdparty: ${{ steps.define.outputs.build_dir_dynamic_freebsd_14_1_thirdparty }}
+      build_dir_dynamic_freebsd_14_0_thirdparty: ${{ steps.define.outputs.build_dir_dynamic_freebsd_14_0_thirdparty }}
 
-      build_dir_dynamic_freebsd_13_qt5: ${{ steps.define.outputs.build_dir_dynamic_freebsd_13_qt5 }}
-      build_dir_dynamic_freebsd_13_qt6: ${{ steps.define.outputs.build_dir_dynamic_freebsd_13_qt6 }}
-      build_dir_dynamic_freebsd_13_qtcreator: ${{ steps.define.outputs.build_dir_dynamic_freebsd_13_qtcreator }}
-      build_dir_dynamic_freebsd_13_thirdparty: ${{ steps.define.outputs.build_dir_dynamic_freebsd_13_thirdparty }}
+      build_dir_dynamic_freebsd_13_3_thirdparty: ${{ steps.define.outputs.build_dir_dynamic_freebsd_13_3_thirdparty }}
 
     steps:
     - name: Checkout repository
@@ -1088,35 +1014,60 @@ jobs:
     - name: Define Cmake Outputs
       id: cmake
       run: |
+        export HEADERS="\
+          -I/usr/local/include \
+          -I/usr/local/lib/gcc${{ env.GCC_VERSION }}/include \
+        "
         echo 'cmake_build_generator="-GNinja"' >> "$GITHUB_OUTPUT"
         echo 'cmake_build_release="-DCMAKE_BUILD_TYPE=Release"' >> "$GITHUB_OUTPUT"
         echo 'cmake_build_shared="-DBUILD_SHARED_LIBS=ON"' >> "$GITHUB_OUTPUT"
         echo 'cmake_build_static="-DBUILD_SHARED_LIBS=OFF"' >> "$GITHUB_OUTPUT"
+        echo 'cmake_build_c_flags="-DCMAKE_C_FLAGS=\"-Wexceptions -std=${{ env.C_STANDARD_VERSION }} $HEADERS -Wno-error=unused-command-line-argument\""'
+        echo 'cmake_build_cxx_flags="-DCMAKE_CXX_FLAGS=\"-Wexceptions -std=${{ env.CXX_STANDARD_VERSION }} $HEADERS -Wno-error=unused-command-line-argument\""'
+        echo 'cmake_build_c_linker="-DCMAKE_C_LINK_EXECUTABlE=lld"' >> "$GITHUB_OUTPUT"
+        echo 'cmake_build_cxx_linker="-DCMAKE_CXX_LINK_EXECUTABlE=lld"' >> "$GITHUB_OUTPUT"
 
     - name: Define Platform Outputs
       id: platform
       run: |
+        export VERSION=`echo ${{ matrix.version }} | sed -e "s@\.@_@"`
+
         if [[ "${{ matrix.platform }}" == "freebsd" ]]; then
           export SYSROOT_JSON=`bash ${{ env.JSON_PREP }} '${{ toJSON(needs.sysroot.outputs) }}'`
           echo 'platform_name_${{ matrix.platform }}=FreeBSD' >> "$GITHUB_OUTPUT"
           echo 'system_version_${{ matrix.platform }}=${{ matrix.version }}' >> "$GITHUB_OUTPUT"
-          if [[ "${{ contains(format('{0}', matrix.version), '14') }}" == "true" ]]; then
-            echo 'cross_version_${{ matrix.platform }}_14=_14' >> "$GITHUB_OUTPUT"
-            echo 'cross_version=_14' >> "$GITHUB_OUTPUT"
-            echo "cross_host=`bash ${{ env.JSON_SCRIPT }} $SYSROOT_JSON '.cross_host_${{ matrix.platform }}_14'`" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ contains(format('{0}', matrix.version), '13') }}" == "true" ]]; then
-            echo 'cross_version_${{ matrix.platform }}_13=_13' >> "$GITHUB_OUTPUT"
-            echo 'cross_version=_13' >> "$GITHUB_OUTPUT"
-            echo "cross_host=`bash ${{ env.JSON_SCRIPT }} $SYSROOT_JSON '.cross_host_${{ matrix.platform }}_13'`" >> "$GITHUB_OUTPUT"
-          fi
-        elif [[ "${{ matrix.platform }}" == "linux" ]]; then
-          #echo 'platform_name_${{ matrix.platform }}=${{ runner.os }}' >> "$GITHUB_OUTPUT"
-          #echo 'system_version_${{ matrix.platform }}="22.04"' >> "$GITHUB_OUTPUT"
-          echo 'cross_version_${{ matrix.platform }}_22=_22' >> "$GITHOUT_OUTPUT"
-          echo 'cross_version=_22' >> "$GITHUB_OUTPUT"
 
-          echo 'cross_host=x86_64-linux-gnu' >> "$GITHUB_OUTPUT"
+          export CROSS_HOST=`bash ${{ env.JSON_SCRIPT }} $SYSROOT_JSON ".cross_host_${{ matrix.platform }}_$VERSION"`
+
+          echo "cross_host_${{ matrix.platform }}_$VERSION=$CROSS_HOST" >> "$GITHUB_OUTPUT"
+          echo "cross_host=$CROSS_HOST" >> "$GITHUB_OUTPUT"
+
+          export SYSROOT_DIR=`bash ${{ env.JSON_SCRIPT }} $SYSROOT_JSON ".sysroot_dir_${{ matrix.platform }}_$VERSION"`
+          export SYSROOT_KEY=`bash ${{ env.JSON_SCRIPT }} $SYSROOT_JSON ".sysroot_key_${{ matrix.platform }}_$VERSION"`
+
+        elif [[ "${{ matrix.platform }}" == "linux" ]]; then
+          echo 'platform_name_${{ matrix.platform }}=Linux' >> "$GITHUB_OUTPUT"
+          echo 'system_version_${{ matrix.platform }}=${{ matrix.version }}' >> "$GITHUB_OUTPUT"
+
+          echo "cross_host_${{ matrix.platform }}_$VERSION=$(gcc -dumpmachine)" >> "$GITHUB_OUTPUT"
+          echo 'cross_host=$(gcc -dumpmachine)' >> "$GITHUB_OUTPUT"
+
+          export SYSROOT_DIR='/'
+          export SYSROOT_KEY='null-key'
         fi
+
+        echo "CROSS_HOST=$CROSS_HOST"
+
+        echo "cross_version_${{ matrix.platform }}_$VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "cross_version=$VERSION" >> "$GITHUB_OUTPUT"
+        
+        echo 'system_version=${{ matrix.version }}' >> "$GITHUB_OUTPUT"
+
+        echo "sysroot_dir_${{ matrix.platform }}_$VERSION=$SYSROOT_DIR" >> "$GITHUB_OUTPUT"
+        echo "syroot_dir=$SYSROOT_DIR" >> "$GITHUB_OUTPUT"
+
+        echo "sysroot_key_${{ matrix.platform }}_$VERSION=$SYSROOT_KEY" >> "$GITHUB_OUTPUT"
+        echo "syroot_key=$SYSROOT_KEY" >> "$GITHUB_OUTPUT"
 
     - name: Prepare ${{ matrix.source }} ${{ matrix.build }} ccache
       id: cache
@@ -1126,12 +1077,14 @@ jobs:
         mkdir -pv ${{ env.CCACHE_DIR }}
         touch ${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
 
-        echo "ccache_dir_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=${{ env.CCACHE_DIR }}" >> "$GITHUB_OUTPUT"
+        echo 'VERSION: ${{ steps.platform.outputs.cross_version }}'
+
+        echo "ccache_dir_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=${{ env.CCACHE_DIR }}" >> "$GITHUB_OUTPUT"
 
     - name: Define Outputs
       id: define
       env:
-        CCACHE_KEY: "${{ matrix.platform }}-${{ matrix.source }}-${{ matrix.build }}-ccache"
+        CCACHE_KEY: "${{ matrix.platform }}-${{ matrix.version }}-${{ matrix.source }}-${{ matrix.build }}-ccache"
         CCACHE_HASH: "${{ hashFiles(format('**/{0}', env.CCACHE_HASH_SOURCE)) }}"
         CCACHE_COMPRESS: true
         CCACHE_COMPRESSLEVEL: 6
@@ -1139,16 +1092,16 @@ jobs:
         CCACHE_CMAKE_CFLAGS: "-DCMAKE_C_COMPILER_LAUNCHER=ccache" 
         CCACHE_CMAKE_CXXFLAGS: "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
         CCACHE_SLOPPINESS: "include_file_mtime,pch_defines,system_headers,include_file_ctime"
-        PREFIX_DIR: "${{ env.PREFIX_DIR }}/${{ matrix.platform }}/${{ matrix.build }}/${{ matrix.version }}/${{ matrix.source }}"
-        BUILD_DIR: "${{ env.BUILD_DIR }}/${{ matrix.platform }}/${{ matrix.build }}/${{ matrix.version }}/${{ matrix.source }}"
+        PREFIX_DIR: "${{ env.PREFIX_DIR }}/${{ matrix.platform }}/${{ matrix.version }}/${{ matrix.build }}/${{ matrix.source }}"
+        BUILD_DIR: "${{ env.BUILD_DIR }}/${{ matrix.platform }}/${{ matrix.version }}/${{ matrix.build }}/${{ matrix.source }}"
 
       run: |
-        echo "ccache_key_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=${{ env.CCACHE_KEY }}-${{ env.CCACHE_HASH }}" >> "$GITHUB_OUTPUT"
+        echo "ccache_key_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=${{ env.CCACHE_KEY }}-${{ env.CCACHE_HASH }}" >> "$GITHUB_OUTPUT"
         echo 'ccache_compress=${{ env.CCACHE_COMPRESS }}' >> "$GITHUB_OUTPUT"
         echo 'ccache_compresslevel=${{ env.CCACHE_COMPRESSLEVEL }}' >> "$GITHUB_OUTPUT"
         echo 'ccache_maxsize=${{ env.CCACHE_MAXSIZE }}' >> "$GITHUB_OUTPUT"
-        echo 'ccache_cmake_cflags=${{ env.CCACHE_CMAKE_CFLAGS }}' >> "$GITHUB_OUTPUT"
-        echo 'ccache_cmake_cxxflags=${{ env.CCACHE_CMAKE_CFLAGS }}' >> "$GITHUB_OUTPUT"
+        echo 'ccache_cmake_build_cflags=${{ env.CCACHE_CMAKE_CFLAGS }}' >> "$GITHUB_OUTPUT"
+        echo 'ccache_cmake_build_cxxflags=${{ env.CCACHE_CMAKE_CFLAGS }}' >> "$GITHUB_OUTPUT"
         echo 'ccache_sloppiness=${{ env.CCACHE_SLOPPINESS }}' >> "$GITHUB_OUTPUT"
 
         # Output Prepare Stage JSON Payloads to be used in the other jobs
@@ -1158,10 +1111,10 @@ jobs:
         export SOURCE_HASH=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.source_hash'`
         export PREFIX_KEY=${{ matrix.platform }}-${{ matrix.version }}-${{ matrix.build }}-${{ matrix.source }}-$SOURCE_HASH
 
-        echo 'prefix_dir_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=${{ env.PREFIX_DIR }}' >> "$GITHUB_OUTPUT"
-        echo "prefix_key_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=$PREFIX_KEY" >> "$GITHUB_OUTPUT"
+        echo 'prefix_dir_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=${{ env.PREFIX_DIR }}' >> "$GITHUB_OUTPUT"
+        echo "prefix_key_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=$PREFIX_KEY" >> "$GITHUB_OUTPUT"
 
-        echo 'build_dir_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=${{ env.BUILD_DIR }}' >> "$GITHUB_OUTPUT"
+        echo 'build_dir_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}=${{ env.BUILD_DIR }}' >> "$GITHUB_OUTPUT"
 
     - name: Trigger ${{ matrix.platform }} Build Stage
       id: prepare
@@ -1195,20 +1148,30 @@ jobs:
       run: |
         export BUILD_JSON=`bash ${{ env.JSON_PREP }} '${{ toJSON(needs.build_prepare.outputs) }}'`
 
-        if [[ "${{ matrix.platform }}" == "freebsd" ]]; then
-          if [[ "${{ contains(format('{0}', matrix.version), '14') }}" == "true" ]]; then
-            export CROSS_VERSION=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.cross_version_${{ matrix.platform }}_14'`
-            echo "cross_version=$CROSS_VERSION" >> "$GITHUB_OUTPUT"
+        export VERSION=`echo ${{ matrix.version }} | sed -e "s@\.@_@"`
 
-          elif [[ "${{ contains(format('{0}', matrix.version), '13') }}" == "true" ]]; then
-            export CROSS_VERSION=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.cross_version_${{ matrix.platform }}_13'`
-            echo "cross_version=$CROSS_VERSION" >> "$GITHUB_OUTPUT"
+        export PLATFORM_NAME=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.platform_name_${{ matrix.platform }}'`
+        export SYSTEM_VERSION=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.system_name_${{ matrix.platform }}'`
 
-          elif [[ "${{ matrix.platform }}" == "linux" ]]; then
-            export CROSS_VERISON=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.cross_version_${{ matrix.platform }}'`
-            echo "cross_version=$CROSS_VERSION" >> "$GITHUB_OUTPUT"
+        echo "platform_name=$PLATFORM_NAME" >> "$GITHUB_OUTPUT"
+        echo "system_version=$SYSTEM_VERSION" >> "$GITHUB_OUTPUT"
 
-        fi
+        export CROSS_VERSION=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON ".cross_version_${{ matrix.platform }}_$VERSION"`
+        echo "cross_version=$CROSS_VERSION" >> "$GITHUB_OUTPUT"
+
+        export CROSS_HOST=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON ".cross_host_${{ matrix.platform }}_$VERSION"`
+        echo "cross_host=$CROSS_HOST" >> "$GITHUB_OUTPUT"
+
+        # For Genie to work correctly; strip out free from freebsd but leave platforms alone
+        export GENIE_OS=`echo ${{ matrix.platform }} | sed -e "s@free@@"`
+        echo "genie_os=$GENIE_OS" >> "$GITHUB_OUTPUT"
+
+        # Sysroot outputs
+        export SYSROOT_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON ".sysroot_dir_${{ matrix.platform }}_$VERSION"`
+        export SYSROOT_KEY=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON ".sysroot_key_${{ matrix.platform }}_$VERSION"`
+
+        echo "sysroot_dir=$SYSROOT_DIR" >> "$GITHUB_OUTPUT"
+        echo "sysroot_key=$SYSROOT_KEY" >> "$GITHUB_OUTPUT"
 
     - name: Define Outputs
       id: define
@@ -1217,22 +1180,17 @@ jobs:
       run: |
         export BUILD_JSON=`bash ${{ env.JSON_PREP }} '${{ toJSON(needs.build_prepare.outputs) }}'`
 
-        export PLATFORM_NAME=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.platform_name_${{ matrix.platform }}'`
-        export SYSTEM_VERSION=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.system_name_${{ matrix.platform }}'`
-        export CROSS_HOST=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.cross_host_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}'`
-
-        echo "platform_name=$PLATFORM_NAME" >> "$GITHUB_OUTPUT"
-        echo "system_version=$SYSTEM_VERSION" >> "$GITHUB_OUTPUT"
-        echo "cross_host=$CROSS_HOST" >> "$GITHUB_OUTPUT"
-
-        export CCACHE_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.ccache_dir_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}${{ matrix.source }}'`
-        export CCACHE_KEY=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.ccache_key_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}${{ matrix.source }}'`
+        export CCACHE_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.ccache_dir_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}'`
+        export CCACHE_KEY=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.ccache_key_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}'`
 
         echo "ccache_dir=$CCACHE_DIR" >> "$GITHUB_OUTPUT"
         echo "ccache_key=$CCACHE_KEY" >> "$GITHUB_OUTPUT"
 
-        export DEPS_DIR=`bash ${{ env.JSON_SCRIPT }} "${{ needs.cache_prepare.outputs.prepare_json }}" ".deps_dir_${{ matrix.dep }}"`
-        export DEPS_KEY=`bash ${{ env.JSON_SCRIPT }} "${{ needs.cache_prepare.outputs.prepare_json }}" ".deps_key_${{ matrix.dep }}"`
+        echo "CCACHE_DIR: $CCACHE_DIR"
+        echo "CCACHE_KEY: $CCACHE_KEY"
+
+        export DEPS_DIR=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.deps_dir_${{ matrix.dep }}'`
+        export DEPS_KEY=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.deps_key_${{ matrix.dep }}'`
 
         echo "deps_dir=$DEPS_DIR" >> "$GITHUB_OUTPUT"
         echo "deps_key=$DEPS_KEY" >> "$GITHUB_OUTPUT"
@@ -1253,13 +1211,13 @@ jobs:
 
         echo "source_hash=$SOURCE_HASH" >> "$GITHUB_OUTPUT"
 
-        export PREFIX_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON ".prefix_dir_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}${{ matrix.source }}"`
-        export PREFIX_KEY=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.prefix_key_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}${{ matrix.source }}'`
+        export PREFIX_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.prefix_dir_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}'`
+        export PREFIX_KEY=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.prefix_key_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}'`
 
         echo "prefix_dir=$PREFIX_DIR" >> "$GITHUB_OUTPUT"
         echo "prefix_key=$PREFIX_KEY" >> "$GITHUB_OUTPUT"
 
-        export BUILD_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON ".build_dir_${{ matrix.build }}_${{ matrix.platform }}${{ steps.platform.outputs.cross_version }}${{ matrix.source }}"`
+        export BUILD_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.build_dir_${{ matrix.build }}_${{ matrix.platform }}_${{ steps.platform.outputs.cross_version }}_${{ matrix.source }}'`
 
         echo "build_dir=$BUILD_DIR" >> "$GITHUB_OUTPUT"
 
@@ -1271,7 +1229,7 @@ jobs:
       with:
         path: |
           ${{ steps.define.outputs.prefix_dir }}
-        key:
+        key: |
           ${{ steps.define.outputs.prefix_key }}
 
     - name: Load ${{ matrix.source }} ${{ matrix.build }} ccache
@@ -1282,8 +1240,9 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: |
-          ${{ steps.ccache.outputs.ccache_dir }}
-        key: ${{ steps.define.outputs.ccache_key }}
+          ${{ steps.define.outputs.ccache_dir }}
+        key: |
+          ${{ steps.define.outputs.ccache_key }}
 
     - name: Load ${{ matrix.source }} Source Cache
       id: source
@@ -1294,7 +1253,8 @@ jobs:
       with:
         path: |
           ${{ steps.define.outputs.source_dir }}
-        key: ${{ steps.define.outputs.source_key }}
+        key: |
+          ${{ steps.define.outputs.source_key }}
 
     - name: Load ${{ matrix.shared }} Dependencies Cache
       id: shared
@@ -1305,7 +1265,8 @@ jobs:
       with:
         path: |
           ${{ steps.define.outputs.shared_dir }}
-        key: ${{ steps.define.outputs.shared_key }}
+        key: |
+          ${{ steps.define.outputs.shared_key }}
 
     - name: Load ${{ matrix.dep }} Dependencies Cache
       id: deps
@@ -1316,7 +1277,20 @@ jobs:
       with:
         path: |
           ${{ steps.define.outputs.deps_dir }}
-        key: ${{ steps.define.outputs.deps_key }}
+        key: |
+          ${{ steps.define.outputs.deps_key }}
+
+    - name: Load ${{ matrix.platform }} Sysroot Cache
+      id: sysroot
+      if: |
+        needs.build_prepare.outputs.complete != 'true' &&
+        steps.load.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ steps.platform.outputs.sysroot_dir }}
+        key: |
+          ${{ steps.platform.outputs.sysroot_key }}
 
     - name: Prepare Apt Sources
       id: apt
@@ -1353,605 +1327,212 @@ jobs:
 
         # Set LLVM specific variables
         sudo bash $TLD/cross/build/linux/update-alternatives-llvm.sh '${{ env.CLANG_VERSION }}' '10000'
+
         sudo mv -v /usr/lib/llvm-14 /usr/lib/llvm-bck
         sudo ln -sv $LLVM_INSTALL_DIR /usr/lib/llvm-14
 
+    - name: Build Genie
+      id: genie
+      if: |
+        needs.build_prepare.outputs.complete != 'true' &&
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        export CC=clang
+        export CXX=clang++
+        
+        cd $TLD/${{ steps.define.outputs.source_dir }}/genie
+        make -j$(nproc)
+        chmod +x bin/linux/genie
+        sudo mv -v bin/linux/genie /usr/bin
+
+    - name: Build Static mimalloc
+      id: mimalloc
+      if: |
+        needs.build_prepare.outputs.complete != 'true' &&
+        steps.load.outputs.cache-hit != 'true'
+      env:
+        BUILD_DIR: "${{ steps.define.outputs.build_dir }}/mimalloc"
+        SOURCE_DIR: "${{ steps.define.outputs.source_dir }}/mimalloc"
+      shell: bash
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
         export CCACHE_DIR=$TLD/${{ steps.define.outputs.ccache_dir }}
         export CCACHE_COMPRESS=${{ needs.build_prepare.outputs.ccache_compress }}
         export CCACHE_COMPRESSLEVEL=${{ needs.build_prepare.outputs.ccache_compresslevel }}
         export CCACHE_MAXSIZE=${{ needs.build_prepare.outputs.ccache_maxsize }}
         export CCACHE_SLOPPINESS=${{ needs.build_prepare.outputs.ccache_sloppiness }}
         ccache -z
-
-    - name: Build Static alsa
-      id: alsa
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      env:
-        BUILD_DIR: "${{ steps.define.outputs.build_dir }}/alsa"
-        SOURCE_DIR: "${{ steps.define.outputs.source_dir }}/alsa"
-      run: >-
-        export TLD=$GITHUB_WORKSPACE
-
-        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
-
-        # Grab this so that Pkg-Config can find what it needs for qt5 to build properly
-        export PKG_CONFIG_PATH=`pkg-config --variables pc_path pkg-config`
-
-        export CC="ccache $CC"
-        export CXX="ccache $CXX"
-
-        export PLATFORM_NAME=${{ steps.define.outputs.platform_name }}
-        export SYSTEM_VERSION=${{ steps.define.outputs.system_version }}
-        export CROSS_HOST=${{ steps.define.outputs.cross_host }}
-
-        mkdir -pv $TLD/${{ env.BUILD_DIR }} $TLD/${{ steps.define.outputs.prefix_dir }}
-
-        du -h $TLD 
 
         cd $TLD/${{ env.SOURCE_DIR }}
 
-        # Prepare the source code
-        libtoolize --force --copy --automake
-        aclocal
-        autoheader
-        automake --foreign --copy --add-missing
-        autoconf
+        if [[ "${{ matrix.platform }}" == "freebsd" ]]; then
+          export SYSROOT="--sysroot=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/"
+          export INCLUDES="-I$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/include -I$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/include/c++/v1"
+          export LDFLAGS="$LDFLAGS -Wl,-rpath=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/lib/gcc${{ env.GCC_VERSION }} -Wl,-rpath=$TLD/${{ steps.platform.outputs.sysroot_dir }}/use/local/lib -Wl,-rpath=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/llvm${{ env.CLANG_VERSION }}/lib"
+          export CFLAGS="$CFLAGS -target ${{ steps.platform.outputs.cross_host }} $SYSROOT $INCLUDES"
+          export CXXFLAGS="$CXXFLAGS -target ${{ steps.platform.outputs.cross_host }} $SYSROOT $INCLUDES -stdlib=libc++"
+          #export LIBRARY_PATH=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/llvm${{ env.CLANG_VERSION }}/lib:$LIBRARY_PATH
 
-        # Build the source
-        cd $TLD/${{ env.BUILD_DIR }}
-        $TLD/${{ env.SOURCE_DIR }}/configure \
-          --prefix=$TLD/${{ steps.define.outputs.prefix_dir }} \
-          --enable-static=yes \
-          --enable-shared=no \
-          --host=${{ steps.platform.outputs.cross_host }}
+          # Do this to set up the cross-compilation things to work properly
+          # These are not detected properly by clang; symlinking is the easiest way to fix it
+          find $TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/lib -type f -name "*crt*.o" -prune -exec ln -sv '{}' . \;
+          find $TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/lib -type f -name "libgcc*" -prune -exec ln -sv '{}' . \;
 
-        make -j$(nproc)
-        make install
-
-        cd $TLD
-
-    - name: Build Static pulseaudio
-      id: pulseaudio
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      env:
-        BUILD_DIR: "${{ steps.define.outputs.build_dir }}/pulseaudio"
-        SOURCE_DIR: "${{ steps.define.outputs.source_dir }}/pulseaudio"
-      run: >-
-        export TLD=$GITHUB_WORKSPACE
-
-        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
-
-        # Grab this so that Pkg-Config can find what it needs for qt5 to build properly
-        export PKG_CONFIG_PATH=`pkg-config --variables pc_path pkg-config`
-
-        mkdir -pv $TLD/${{ env.BUILD_DIR }}
-
-        # Prepare the source code
-        meson $TLD/${{ env.SOURCE_DIR }} \
-          $TLD/${{ env.BUILD_DIR }} \
-          --cross-file $TLD/cross/build/linux/cross-meson.txt \
-          -D buildtype=release \
-          -D cmake_prefix_path=$TLD/${{ steps.define.outputs.prefix_dir }} \
-          -D pkg_config_path=$PKG_CONFIG_PATH \
-          -D unity=on -D prefer_static=true \
-          -D c_args=$CFLAGS \
-          -D c_link_args=$LDFLAGS \
-          -D c_std=c17 -D cpp_std=c++17 \
-          -D prefix=$TLD/${{ steps.define.outputs.prefix_dir }} \
-          -D doxygen=false -D alsa=enabled -D bluez5=disabled
-
-        # Build the source
-        ninja -j$(nproc) -C $TLD/${{ env.BUILD_DIR }}
-        ninja -C $TLD/${{ env.BUILD_DIR }} install
-
-        cd $TLD
-
-    - name: Build Static openal
-      id: openal
-      env:
-        BUILD_DIR: "${{ steps.define.outputs.build_dir }}/openal"
-        SOURCE_DIR: "${{ steps.define.outputs.source_dir }}/openal"
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      run: >-
-        export TLD=$GITHUB_WORKSPACE
-
-        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
-
-        # Grab this so that Pkg-Config can find what it needs for qt5 to build properly
-        export PKG_CONFIG_PATH=`pkg-config --variables pc_path pkg-config`
-
-        export PLATFORM_NAME=${{ steps.platform.outputs.platform_name }}
-        export SYSTEM_VERSION=${{ steps.platform.outputs.system_version }}
-        export CROSS_HOST=${{ steps.platform.outputs.cross_host }}
-
-        mkdir -pv $TLD/${{ env.BUILD_DIR }}
-        cmake ${{ needs.build_prepare.outputs.cmake_build_generator }} \
-          ${{ needs.build_prepare.outputs.ccache_cmake_cflags }} \
-          ${{ needs.build_prepare.outputs.ccache_cmake_cxxflags }} \
-          ${{ needs.build_prepare.outputs.cmake_build_release }} \
-          -DCMAKE_SYSTEM_NAME=${{ steps.platform.outputs.platform_name }} \
-          -DCMAKE_SYSTEM_VERSION=${{ steps.platform.outputs.system_version }} \
-          -DCMAKE_INSTALL_PREFIX=$TLD/${{ steps.define.outputs.prefix_dir }} \
-          ${{ needs.build_prepare.outputs.cmake_build_static }} \
-          -B $TLD/${{ env.BUILD_DIR }} \
-          -S $TLD/${{ env.SOURCE_DIR }}
-
-        cmake --build $TLD/${{ env.BUILD_DIR }} --parallel $(nproc)
-        cmake --install $TLD/${{ env.BUILD_DIR }}
-
-        ccache -s
-
-    - name: Cache ${{ matrix.source }} ${{ matrix.build }} Build
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.prefix_dir }}
-        key: |
-          ${{ steps.define.outputs.prefix_key }}
-
-    - name: Cache ${{ matrix.source }} ${{ matrix.build }} ccache
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.ccache_dir }}
-        key: |
-          ${{ steps.define.outptus.ccache_key }}
-
-  static:
-    name: Compile Static QT
-    runs-on: ubuntu-22.04
-    needs: [define, matrix, cache_prepare, build_prepare, static_deps]
-
-    # description: 'Build static versions of Qt5, Qt6, and QtCreator to be linked against when building distributable shared libraries'
-
-    strategy:
-      matrix: ${{ fromJSON(needs.matrix.outputs.matrix_build_static) }}
-
-    steps:
-    - name: Checkout repository
-      id: checkout
-      if: |
-        needs.build_prepare.outputs.complete != 'true'
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        path: 'cross'
-
-    - name: Define Outputs
-      id: define
-      if: |
-        needs.build_prepare.outputs.complete != 'true'
-      run: |
-        export BUILD_JSON=`bash ${{ env.JSON_PREP }} '${{ toJSON(needs.build_prepare.outputs) }}'`
-
-        exit 1
-
-        export CCACHE_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.ccache_dir_${{ matrix.build }}_${{ matrix.source }}'`
-        export CCACHE_KEY=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.ccache_key_${{ matrix.build }}_${{ matrix.platform }}'`
-
-        echo "ccache_dir=$CCACHE_DIR" >> "$GITHUB_OUTPUT"
-        echo "ccache_key=$CCACHE_KEY" >> "$GITHUB_OUTPUT"
-
-        export DEPS_DIR=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.deps_dir_${{ matrix.source }}'`
-        export DEPS_KEY=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.deps_key_${{ matrix.source }}'`
-
-        echo "deps_dir=$DEPS_DIR" >> "$GITHUB_OUTPUT"
-        echo "deps_key=$DEPS_KEY" >> "$GITHUB_OUTPUT"
-
-        export SHARED_DIR=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.shared_dir_${{ matrix.dep }}'`
-        export SHARED_KEY=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.shared_key_${{ matrix.dep }}'`
-
-        echo "shared_dir=$SHARED_DIR" >> "$GITHUB_OUTPUT"
-        echo "shared_key=$SHARED_KEY" >> "$GITHUB_OUTPUT"
-
-        export SOURCE_DIR=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.source_dir_${{ matrix.source }}'`
-        export SOURCE_KEY=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.source_key_${{ matrix.source }}'`
-
-        echo "source_dir=$SOURCE_DIR" >> "$GITHUB_OUTPUT"
-        echo "source_key=$SOURCE_KEY" >> "$GITHUB_OUTPUT"
-
-        export BUILD_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.build_dir_${{ matrix.build }}_${{ matrix.platform }}_${{ matrix.source }}'`
-        export BUILD_KEY=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.build_key_${{ matrix.build }}_${{ matrix.platform }}_${{ matrix.source }}'`
-
-        echo "build_dir=$BUILD_DIR" >> "$GITHUB_OUTPUT"
-        echo "build_key=$BUILD_KEY" >> "$GITHUB_OUTPUT"
-
-    - name: Load ${{ matrix.platform }} ${{ matrix.build }} cache
-      id: load
-      if: |
-        needs.build_prepare.outputs.complete != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.build_dir }}
-        key:
-          ${{ steps.define.outputs.build_key }}
-
-    - name: Load ${{ matrix.source }} ${{ matrix.build }} ccache
-      id: ccache
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.ccache_dir }}
-        key: ${{ steps.define.outputs.ccache_key }}
-
-    - name: Load ${{ matrix.source }} Source Cache
-      id: source
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.source_dir }}
-        key: ${{ steps.define.outputs.source_key }}
-
-    - name: Load ${{ matrix.dep }} Dependencies Cache
-      id: shared
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.deps_dir }}
-        key: ${{ steps.define.outputs.deps_key }}
-
-    - name: Load ${{ matrix.source }} Dependencies Cache
-      id: deps
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.deps_dir }}
-        key: ${{ steps.define.outputs.deps_key }}
-
-    - name: Prepare Apt Sources
-      id: apt
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
-      run: |
-        export TLD=$GITHUB_WORKSPACE
-        export DEPS_DIR="${{ steps.define.outputs.deps_dir }}"
-
-        bash $TLD/cross/build/source/prepare-apt-sources-after.sh
-
-    - name: Install ${{ matrix.source }} Dependencies
-      id: install
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
-      run: |
-        export TLD=$GITHUB_WORKSPACE
-
-        sudo apt-get update
-        source $TLD/cross/build/source/${{ env.DEPS_HASH_SOURCE }}
-        bash $TLD/cross/build/source/install-${{ matrix.dep }}-deps.sh
-        bash $TLD/cross/build/source/install-${{ matrix.source }}-deps.sh
-
-    - name: Apply Build Fixes
-      id: patch
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
-      run: |
-          export TLD=$GITHUB_WORKSPACE
+          export LLVM_INSTALL_DIR=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/llvm${{ env.CLANG_VERSION }}
+        elif [[ "${{ matrix.platform }}" == "linux" ]]; then
           export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
-          export SOURCE=${{ matrix.source }}
-          export SOURCE_DIR="$TLD/${{ steps.define.outputs.source_dir }}"
-
-          bash $TLD/cross/build/linux/apply-build-fixes.sh
-
-    - name: Build ${{ matrix.source }} ${{ matrix.build }}
-      id: build
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
-      run: |
-        export TLD=$GITHUB_WORKSPACE
-        export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
-        export SOURCE_DIR="$TLD/${{ steps.define.outputs.source_dir }}"
-
-        # Create a list of all installed LLVM static libraries to solve linking issues during compilation
-        export LLVM_LIBS="`bash $TLD/cross/build/linux/get-llvm-static-libs.sh`"
-
-        # These can probably be added directly into the qmake.conf files with patches, but that needs heavy testing and is finicky
-        export CC="clang"
-        export CXX="clang++"
-        export CFLAGS="$CFLAGS `llvm-config --cflags`"
-        export CXXFLAGS="$CXXFLAGS `llvm-config --cxxflags`"
-        export CPPFLAGS="$CPPFLAGS `llvm-config --cppflags`"
-        export LDFLAGS="$LDFLAGS `llvm-config --ldflags` `llvm-config --libs` -lc++abi $LLVM_LIBS"
-
-        export CCACHE_DIR=$TLD/${{ steps.define.outputs.ccache_dir }}
-        export CCACHE_COMPRESS=${{ needs.build_prepare.outputs.ccache_compress }}
-        export CCACHE_COMPRESSLEVEL=${{ needs.build_prepare.outputs.ccache_compresslevel }}
-        export CCACHE_MAXSIZE=${{ needs.build_prepare.outputs.ccache_maxsize }}
-        export CCACHE_SLOPPINESS=${{ needs.build_prepare.outputs.ccache_sloppiness }}
-
-        ccache -z
-        mkdir -pv $TLD/build
-        cd $TLD/build
+        fi
 
         # Grab this so that Pkg-Config can find what it needs for qt5 to build properly
         export PKG_CONFIG_PATH=`pkg-config --variable pc_path pkg-config`
 
-        if [[ "${{ matrix.source }}" == "qtcreator" ]]; then
-          # Force exceptions on to complete the build
-          export CFLAGS="$CFLAGS -fexceptions"
-          export CXXFLAGS="$CXXFLAGS -fexceptions"
+        mkdir -pv $TLD/${{ env.BUILD_DIR }}
+        ln -sv $TLD/${{ env.BUILD_DIR }} build
 
-          cmake -GNinja ${{ needs.build_prepare.outputs.ccache_cmake_cflags }} ${{ needs.build_prepare.outputs.ccache_cmake_cxxflags }} -S $SOURCE_DIR -B $TLD/build -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$TLD/${{ steps.define.outputs.build_dir }} -DBUILD_SHARED_LIBS=OFF
-        else
-          $SOURCE_DIR/configure -prefix $TLD/${{ steps.define.outputs.build_dir }} -c++std ${{ env.CXX_STANDARD_VERSION }} -platform linux-clang-libc++ ${{ env.QT_BUILD_FLAGS }} -static $EXTRA_LIBS
-        fi
+        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
 
-        if [[ "${{ matrix.source }}" == "qt5" ]]; then
-          make -j$(nproc)
-          make install
-        else
-          cmake --build . --parallel $(nproc)
-          cmake --install .
-        fi
+        cmake ${{ needs.build_prepare.outputs.cmake_build_generator }} \
+          ${{ needs.build_prepare.outputs.ccache_cmake_build_cflags }} \
+          ${{ needs.build_prepare.outputs.ccache_cmake_build_cxxflags }} \
+          ${{ needs.build_prepare.outputs.cmake_build_release }} \
+          -DCMAKE_INSTALL_PREFIX=$TLD/${{ steps.define.outputs.prefix_dir }} \
+          ${{ needs.build_prepare.outputs.cmake_build_static }} \
+          -B build \
+          -S . \
+          ${{ needs.build_prepare.outputs.cmake_build_c_flags }} \
+          ${{ needs.build_prepare.outputs.cmake_build_cxx_flags }} \
+          -DMI_USE_CXX="ON" \
+          -DMI_BUILD_SHARED="OFF" -DMI_BUILD_TESTS=OFF
 
-        cd $TLD
+        cmake --build build --parallel $(nproc)
+        cmake --install build
+
         ccache -s
 
-    - name: Cache ${{ matrix.source }} ${{ matrix.build }} Build
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.build_dir }}
-        key: |
-          ${{ steps.define.outputs.build_key }}
+        cd $TLD
 
-    - name: Cache ${{ matrix.source }} ${{ matrix.build }} ccache
+
+    - name: Build Static soloud
+      id: soloud
       if: |
         needs.build_prepare.outputs.complete != 'true' &&
         steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.ccache_dir }}
-        key: |
-          ${{ steps.define.outptus.ccache_key }}
-
-  dynamic:
-    name: Compile Dynamic Build
-    runs-on: ubuntu-22.04
-    needs: [define, matrix, cache_prepare, build_prepare, static]
-
-    strategy:
-      matrix: ${{ fromJSON(needs.matrix.outputs.matrix_build_dynamic) }}
-
-    steps:
-    - name: Checkout repository
-      id: checkout
-      if: |
-        needs.build_prepare.outputs.complete != 'true'
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        path: 'cross'
-
-    - name: Define Outputs
-      id: define
-      if: |
-        needs.build_prepare.outputs.complete != 'true'
-      run: |
-        export BUILD_JSON=`bash ${{ env.JSON_PREP }} '${{ toJSON(needs.build_prepare.outputs) }}'`
-
-        export CCACHE_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.ccache_dir_${{ matrix.build }}_${{ matrix.source }}'`
-        export CCACHE_KEY=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.ccache_key_${{ matrix.build }}_${{ matrix.platform }}'`
-
-        echo "ccache_dir=$CCACHE_DIR" >> "$GITHUB_OUTPUT"
-        echo "ccache_key=$CCACHE_KEY" >> "$GITHUB_OUTPUT"
-
-        export DEPS_DIR=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.deps_dir_${{ matrix.source }}'`
-        export DEPS_KEY=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.deps_key_${{ matrix.source }}'`
-
-        echo "deps_dir=$DEPS_DIR" >> "$GITHUB_OUTPUT"
-        echo "deps_key=$DEPS_KEY" >> "$GITHUB_OUTPUT"
-
-        export SHARED_DIR=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.shared_dir_${{ matrix.dep }}'`
-        export SHARED_KEY=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.shared_key_${{ matrix.dep }}'`
-
-        echo "shared_dir=$SHARED_DIR" >> "$GITHUB_OUTPUT"
-        echo "shared_key=$SHARED_KEY" >> "$GITHUB_OUTPUT"
-
-        export SOURCE_DIR=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.source_dir_${{ matrix.source }}'`
-        export SOURCE_KEY=`bash ${{ env.JSON_SCRIPT }} '${{ needs.cache_prepare.outputs.prepare_json }}' '.source_key_${{ matrix.source }}'`
-
-        echo "source_dir=$SOURCE_DIR" >> "$GITHUB_OUTPUT"
-        echo "source_key=$SOURCE_KEY" >> "$GITHUB_OUTPUT"
-
-        export PREFIX_DIR=`bash ${{ env.JSON_SCRIPT }} $PREFIX_JSON '.prefix_dir_${{ matrix.prefix }}_${{ matrix.platform }}_${{ matrix.source }}'`
-        export PREFIX_KEY=`bash ${{ env.JSON_SCRIPT }} $PREFIX_JSON '.prefix_key_${{ matrix.prefix }}_${{ matrix.platform }}_${{ matrix.source }}'`
-
-        echo "prefix_dir=$PREFIX_DIR" >> "$GITHUB_OUTPUT"
-        echo "prefix_key=$PREFIX_KEY" >> "$GITHUB_OUTPUT"
-
-        export BUILD_DIR=`bash ${{ env.JSON_SCRIPT }} $BUILD_JSON '.build_dir_${{ matrix.build }}_${{ matrix.platform }}_${{ matrix.source }}'`
-
-        echo "build_dir=$BUILD_DIR" >> "$GITHUB_OUTPUT"
-
-    - name: Load ${{ matrix.platform }} ${{ matrix.build }} cache
-      id: load
-      if: |
-        needs.build_prepare.outputs.complete != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.build_dir }}
-        key:
-          ${{ steps.define.outputs.build_key }}
-
-    - name: Load ${{ matrix.source }} ${{ matrix.build }} ccache
-      id: ccache
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.ccache_dir }}
-        key: |
-          ${{ steps.define.outputs.ccache_key }}
-
-    - name: Load ${{ matrix.source }} Source Cache
-      id: source
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.source_dir }}
-        key: |
-          ${{ steps.define.outputs.source_key }}
-
-    - name: Load ${{ matrix.dep }} Dependencies Cache
-      id: shared
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.deps_dir }}
-        key: ${{ steps.define.outputs.deps_key }}
-
-    - name: Load ${{ matrix.source }} Dependencies Cache
-      id: deps
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          ${{ steps.define.outputs.deps_dir }}
-        key: ${{ steps.define.outputs.deps_key }}
-
-    - name: Prepare Apt Sources
-      id: apt
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
+      env:
+        BUILD_DIR: "${{ steps.define.outputs.build_dir }}/soloud"
+        SOURCE_DIR: "${{ steps.define.outputs.source_dir }}/soloud"
+      shell: bash
       run: |
         export TLD=$GITHUB_WORKSPACE
-        export DEPS_DIR="${{ steps.define.outputs.deps_dir }}"
-
-        bash $TLD/cross/build/source/prepare-apt-sources-after.sh
-
-    - name: Install ${{ matrix.source }} Dependencies
-      id: install
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
-      run: |
-        export TLD=$GITHUB_WORKSPACE
-
-        sudo apt-get update
-        source $TLD/cross/build/source/${{ env.DEPS_HASH_SOURCE }}
-        bash $TLD/cross/build/source/install-${{ matrix.dep }}-deps.sh
-        bash $TLD/cross/build/source/install-${{ matrix.source }}-deps.sh
-
-    - name: Apply Build Fixes
-      id: patch
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
-      run: |
-          export TLD=$GITHUB_WORKSPACE
-          export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
-          export SOURCE=${{ matrix.source }}
-          export SOURCE_DIR="$TLD/${{ steps.define.outputs.source_dir }}"
-
-          bash $TLD/cross/build/linux/apply-build-fixes.sh
-
-    - name: Build ${{ matrix.source }} ${{ matrix.build }}
-      id: build
-      if: |
-        needs.build_prepare.outputs.complete != 'true' &&
-        steps.load.outputs.cache-hit != true
-      run: |
-        export TLD=$GITHUB_WORKSPACE
-        export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
-        export SOURCE_DIR="$TLD/${{ steps.define.outputs.source_dir }}"
-
-        # Create a list of all installed LLVM static libraries to solve linking issues during compilation
-        export LLVM_LIBS="`bash $TLD/cross/build/linux/get-llvm-static-libs.sh`"
-
-        # These can probably be added directly into the qmake.conf files with patches, but that needs heavy testing and is finicky
-        export CC="clang"
-        export CXX="clang++"
-        export CFLAGS="$CFLAGS `llvm-config --cflags`"
-        export CXXFLAGS="$CXXFLAGS `llvm-config --cxxflags`"
-        export CPPFLAGS="$CPPFLAGS `llvm-config --cppflags`"
-        export LDFLAGS="$LDFLAGS `llvm-config --ldflags` `llvm-config --libs` -lc++abi $LLVM_LIBS"
 
         export CCACHE_DIR=$TLD/${{ steps.define.outputs.ccache_dir }}
         export CCACHE_COMPRESS=${{ needs.build_prepare.outputs.ccache_compress }}
         export CCACHE_COMPRESSLEVEL=${{ needs.build_prepare.outputs.ccache_compresslevel }}
         export CCACHE_MAXSIZE=${{ needs.build_prepare.outputs.ccache_maxsize }}
         export CCACHE_SLOPPINESS=${{ needs.build_prepare.outputs.ccache_sloppiness }}
-
         ccache -z
-        mkdir -pv $TLD/build
-        cd $TLD/build
 
-        # Set Freebsd specific variables due to cross compiling
+        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
         if [[ "${{ matrix.platform }}" == "freebsd" ]]; then
-          export PLATFORM_FLAGS="-xplatform freebsd-clang"
-
-          export EXTRA_CFLAGS="-isysroot $TLD/${{ needs.sysroot.outputs.sysroot_dir }}/usr/local/include -isysroot $TLD/${{ needs.sysroot.outputs.sysroot_dir }}/usr/include -L$TLD/${{ needs.sysroot.outputs.sysroot_dir }}/usr/lib"
-          export EXTRA_CXXFLAGS="$EXTRA_CFLAGS"
-
-          export CFLAGS="$CFLAGS $EXTRA_CFLAGS"
-          export CXXFLAGS="$CXXFLAGS $EXTRA_CXXFLAGS"
+          export LDFLAGS="$LDFLAGS -Wl,-rpath=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/lib/gcc${{ env.GCC_VERSION }}"
         fi
 
-        if [[ "${{ matrix.source }}" == "qtcreator" ]]; then
-          # Force exceptions on to complete the build
-          export CFLAGS="$CFLAGS -fexceptions"
-          export CXXFLAGS="$CXXFLAGS -fexceptions"
+        # Grab this so that Pkg-Config can find what it needs for qt5 to build properly
+        export PKG_CONFIG_PATH=`pkg-config --variable pc_path pkg-config`
 
-          cmake -G Ninja ${{ needs.build_prepare.outputs.ccache_cmake_cflags }} ${{ needs.build_prepare.outputs.ccache_cmake_cxxflags }} -S $SOURCE_DIR -B $TLD/build -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$TLD/${{ steps.define.outputs.build_dir }} -DBUILD_SHARED_LIBS=ON
-        else
-          $SOURCE_DIR/configure -prefix $TLD/${{ steps.define.outputs.build_dir }} -c++std ${{ env.CXX_STANDARD_VERSION }} -platform linux-clang-libc++ $PLATFORM_FLAGS ${{ env.QT_BUILD_FLAGS }}
-        fi
+        mkdir -pv $TLD/${{ env.BUILD_DIR }}
 
-        if [[ "${{ matrix.source }}" == "qt5" ]]; then
-          make -j$(nproc)
-          make install
-        else
-          cmake --build . --parallel $(nproc)
-          cmake --install .
-        fi
+        cd $TLD/${{ env.SOURCE_DIR }}/build
+
+        # Multi-stage process
+        genie --os=${{ steps.platform.outputs.genie_os }} --platform=x64 --with-miniaudio-only cmake
+
+        ln -sv $TLD/${{ env.BUILD_DIR }} build
+
+        cmake ${{ needs.build_prepare.outputs.cmake_build_generator }} \
+          ${{ needs.build_prepare.outputs.ccache_cmake_build_cflags }} \
+          ${{ needs.build_prepare.outputs.ccache_cmake_build_cxxflags }} \
+          ${{ needs.build_prepare.outputs.cmake_build_release }} \
+          -DCMAKE_INSTALL_PREFIX=$TLD/${{ steps.define.outputs.prefix_dir }} \
+          ${{ needs.build_prepare.outputs.cmake_build_static }} \
+          -B build \
+          -S cmake \
+          ${{ needs.build_prepare.outputs.cmake_build_c_flags }} \
+          ${{ needs.build_prepare.outputs.cmake_build_cxx_flags }} \
+          ${{ needs.build_prepare.outputs.cmake_build_c_linker }} \
+          ${{ needs.build_prepare.outputs.cmake_build_cxx_linker }} \
+          -DCMAKE_SYSTEM_NAME=${{ steps.platform.outputs.platform_name }} \
+          -DCMAKE_SYSTEM_VERSION=${{ steps.platform.outputs.system_version }} \
+          -DCMAKE_SYSROOT=${{ steps.platform.outputs.sysroot_dir }}
+
+        cmake --build build --parallel $(nproc)
+        cmake --install build
+
+        ccache -s
 
         cd $TLD
+
+    - name: Build Static bgfx
+      id: bgfx
+      if: |
+        needs.build_prepare.outputs.complete != 'true' &&
+        steps.load.outputs.cache-hit != 'true'
+      env:
+        BUILD_DIR: "${{ steps.define.outputs.build_dir }}/bgfx"
+        SOURCE_DIR: "${{ steps.define.outputs.source_dir }}/bgfx"
+      shell: bash
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        export CCACHE_DIR=$TLD/${{ steps.define.outputs.ccache_dir }}
+        export CCACHE_COMPRESS=${{ needs.build_prepare.outputs.ccache_compress }}
+        export CCACHE_COMPRESSLEVEL=${{ needs.build_prepare.outputs.ccache_compresslevel }}
+        export CCACHE_MAXSIZE=${{ needs.build_prepare.outputs.ccache_maxsize }}
+        export CCACHE_SLOPPINESS=${{ needs.build_prepare.outputs.ccache_sloppiness }}
+        ccache -z
+
+        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
+        if [[ "${{ matrix.platform }}" == "freebsd" ]]; then
+          export LDFLAGS="$LDFLAGS -Wl,-rpath=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/lib/gcc${{ env.GCC_VERSION }}"
+        fi
+
+        # Grab this so that Pkg-Config can find what it needs for qt5 to build properly
+        export PKG_CONFIG_PATH=`pkg-config --variable pc_path pkg-config`
+
+        cd $TLD/${{ env.SOURCE_DIR }}/../bx
+        patch -p1 -i $TLD/cross/patches/freebsd/Fixes-FreeBSD-Build.patch
+
+        cd $TLD/${{ env.SOURCE_DIR }}
+
+        # Hacked in build system
+        genie --os=linux --platform=x64 --gcc=linux-clang --with-tools cmake
+
+        ln -sv .build/projects/cmake build
+
+        cmake ${{ needs.build_prepare.outputs.cmake_build_generator }} \
+          ${{ needs.build_prepare.outputs.ccache_cmake_build_cflags }} \
+          ${{ needs.build_prepare.outputs.ccache_cmake_build_cxxflags }} \
+          ${{ needs.build_prepare.outputs.cmake_build_release }} \
+          -DCMAKE_INSTALL_PREFIX=$TLD/${{ steps.define.outputs.prefix_dir }} \
+          ${{ needs.build_prepare.outputs.cmake_build_static }} \
+          -B build \
+          -S . \
+          ${{ needs.build_prepare.outputs.cmake_build_c_flags }} \
+          ${{ needs.build_prepare.outputs.cmake_build_cxx_flags }} \
+          ${{ needs.build_prepare.outputs.cmake_build_c_linker }} \
+          ${{ needs.build_prepare.outputs.cmake_build_cxx_linker }} \
+          -DCMAKE_SYSTEM_NAME=${{ steps.platform.outputs.platform_name }} \
+          -DCMAKE_SYSTEM_VERSION=${{ steps.platform.outputs.system_version }} \
+          -DCMAKE_SYSROOT=${{ steps.platform.outputs.sysroot_dir }}
+
+        cmake --build build --parallel $(nproc)
+        cmake --install build
+
         ccache -s
+
+        cd $TLD
 
     - name: Cache ${{ matrix.source }} ${{ matrix.build }} Build
       if: |
@@ -1973,4 +1554,4 @@ jobs:
         path: |
           ${{ steps.define.outputs.ccache_dir }}
         key: |
-          ${{ steps.define.outputs.ccache_key }}
+          ${{ steps.define.outptus.ccache_key }}

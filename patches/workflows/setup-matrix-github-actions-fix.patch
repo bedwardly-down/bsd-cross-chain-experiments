@@ -1,16 +1,16 @@
-From e2d65b1ca29cc3a06a90e2b1a9c70796c91864fe Mon Sep 17 00:00:00 2001
+From 727ac1e59033aca5174babb99c78fb043d859cd9 Mon Sep 17 00:00:00 2001
 From: Brad D <social@brandongrows.me>
 Date: Tue, 27 Aug 2024 13:29:22 -0500
 Subject: [PATCH] setup-matrix github actions fix
 
 ---
  .dockerignore        |  7 ++++++-
- Dockerfile           | 19 ++++++++++++++-----
+ Dockerfile           | 23 ++++++++++++++++++-----
  action.yml           |  2 +-
  main.sh              |  8 ++++++++
  requirements-dev.txt |  6 ------
  requirements.txt     |  1 -
- 6 files changed, 29 insertions(+), 14 deletions(-)
+ 6 files changed, 33 insertions(+), 14 deletions(-)
  create mode 100755 main.sh
  delete mode 100644 requirements-dev.txt
  delete mode 100644 requirements.txt
@@ -32,36 +32,40 @@ index 0488914..f0033ad 100644
 +!.venv
 +!get-pipenv.py
 diff --git a/Dockerfile b/Dockerfile
-index cab9c8d..78bd745 100644
+index cab9c8d..16e3097 100644
 --- a/Dockerfile
 +++ b/Dockerfile
-@@ -1,13 +1,22 @@
+@@ -1,13 +1,26 @@
 -FROM python:3
 +FROM python:3.10-alpine
  
  WORKDIR /app
  
 -RUN pip install -IU pip setuptools wheel
++ENV VIRTUAL_ENV=/app/.venv
+ 
+-COPY requirements.txt .
++# so that pipenv uses installed libraries when setting it up
++RUN mkdir -pv /root/.local
++COPY .venv /root/.local
+ 
+-RUN pip install -IUr requirements.txt
 +COPY .venv .
 +COPY get-pipenv.py .
  
--COPY requirements.txt .
-+ENV PIPENV_VENV_IN_PROJECT=1
- 
--RUN pip install -IUr requirements.txt
 +COPY Pipfile .
 +COPY Pipfile.lock .
- 
-+RUN python3 /app/get-pipenv.py
 +
 +COPY .venv/.project ./.venv/.project
-+
-+RUN pipenv sync -d
 +
 +COPY main.sh .
  COPY main.py .
  
 -ENTRYPOINT /app/main.py
++ENV PATH="$VIRTUAL_ENV/bin:$PATH"
++
++RUN python3 -m venv $VIRTUAL_ENV && python3 get-pipenv.py && pipenv sync -d
++
 +ENTRYPOINT /app/main.sh
 diff --git a/action.yml b/action.yml
 index bdb95c9..8b0540e 100644

@@ -27,6 +27,7 @@ export SHARED_DEPS=" \
     perl \
     libedit-dev \
     g++-12 \
+    libc6-dev \
     libstdc++-12-dev \
     libstdc++-11-dev \
     gnulib \
@@ -68,10 +69,6 @@ export LIB_DEPS=" \
     libdrm-dev \
     libfontconfig1-dev \
     libfreetype6-dev \
-    libgl1-mesa-dev \
-    libgles2-mesa-dev \
-    libglib2.0-dev \
-    libglu1-mesa-dev \
     libgst-dev \
     libgstreamer-plugins-bad1.0-dev \
     libgstreamer-plugins-base1.0-dev \
@@ -131,114 +128,26 @@ export LIB_DEPS=" \
     libxslt1-dev \
 "
 
-export QT5_DEPS=" \
-    libkf5pulseaudioqt-dev \
-    libqt5opengl5-dev \
-    libqt5scxml5-dev \
-    libqt5scxml5-private-dev \
-    libqt5serialport5-dev \
-    libqt5svg5-dev \
-    qt3d5-dev \
-    qt3d5-dev-tools \
-    qtbase5-dev \
-    qtbase5-private-dev \
-    qtdeclarative5-dev \
-    qtdeclarative5-private-dev \
-    qttools5-dev \
-    qttools5-dev-tools \
-    qttools5-private-dev \
-"
-
-export QT5_BUILD_DEPS=" \
-    libqt5opengl5-dev \
-    libqt5scxml5-dev \
-    libqt5scxml5-private-dev \
-    libqt5serialport5-dev \
-    libqt5svg5-dev \
-    qml-module-qt3d \
-    qt3d5-dev-tools \
-    qtbase5-dev \
-    qtbase5-private-dev \
-    qtdeclarative5-dev \
-    qtdeclarative5-private-dev \
-    qttools5-dev \
-    qttools5-dev-tools \
-    qttools5-private-dev \
-"
-
-export QT6_DEPS=" \
-    libqt6core5compat6-dev \
-    libqt6opengl6-dev \
-    libqt6quicktimeline6-dev \
-    libqt6serialport6-dev \
-    libqt6shadertools6-dev \
-    libqt6svg6-dev \
-    qt6-base-dev \
-    qt6-base-private-dev \
-    qt6-declarative-dev \
-    qt6-declarative-private-dev \
-    qt6-documentation-tools \
-    qt6-l10n-tools \
-    qt6-quick3d-dev \
-    qt6-quick3d-dev-tools \
-    qt6-scxml-dev \
-    qt6-shader-baker \
-    qt6-tools-dev \
-    qt6-tools-dev-tools \
-    qt6-tools-private-dev \
-"
-
-export QT6_BUILD_DEPS=" \
-    libqt6core5compat6-dev \
-    libqt6opengl6-dev \
-    libqt6quicktimeline6-dev \
-    libqt6serialport6-dev \
-    libqt6shadertools6-dev \
-    libqt6svg6-dev \
-    qml6-module-qt3d-extras \
-    qml6-module-qt5compat-graphicaleffects \
-    qml6-module-qtcore \
-    qml6-module-qtmultimedia \
-    qml6-module-qtqml \
-    qml6-module-qtquick \
-    qml6-module-qtquick-controls \
-    qml6-module-qtquick-timeline \
-    qml6-module-quick3d \
-    qt6-base-dev \
-    qt6-base-private-dev \
-    qt6-declarative-dev \
-    qt6-declarative-private-dev \
-    qt6-documentation-tools \
-    qt6-l10n-tools \
-    qt6-quick3d-dev \
-    qt6-quick3d-dev-tools \
-    qt6-scxml-dev \
-    qt6-shader-baker \
-    qt6-tools-dev \
-    qt6-tools-dev-tools \
-    qt6-tools-private-dev \
-"
-
-export QTCREATOR_DEPS=" \
-"
-
-export QTCREATOR_BUILD_DEPS=" \
-    qbs \
-    qtcreator \
-"
-
 export THIRDPARTY_DEPS=" \
     meson \
+    genie \
+    premake \
+    libglfw-dev \
+    libopengl-dev \
+    libmesa-dev \
+    libgl1-mesa-dev \
+    libgles2-mesa-dev \
+    libglib2.0-dev \
+    libglu1-mesa-dev \
 "
 
 export THIRDPARTY_BUILD_DEPS=" \
-    alsa-base, \
+    bgfx, \
     gstreamer-1.0, \
     gstreamer-1.0-plugins-good, \
     gstreamer-1.0-plugins-bad, \
     gstreamer-1.0-plugins-ugly, \
     openal-soft, \
-    pulseaudio, \
     libpng16-16, \
     libwebp \
 "

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Fix libunwind pkg-config
-sudo cp -rfv $TLD/thunder/build/linux/pkgconfig/*.pc /usr/lib/pkgconfig
+sudo cp -rfv $TLD/cross/build/linux/pkgconfig/*.pc /usr/lib/pkgconfig
 
 # Force LLVM to link to proper version
 sudo mv -v /usr/lib/llvm-14 /usr/lib/llvm-bck
@@ -20,7 +20,7 @@ if [[ "$SOURCE" != "qtcreator" ]]; then
 
     # Apply qmake fixes for various different packages that don't get detected properly
     if [[ "$SOURCE" == "qt5" ]]; then
-        patch -p1 -i $TLD/thunder/patches/linux/pkg-config-qmake-fixes.patch
+        patch -p1 -i $TLD/cross/patches/linux/pkg-config-qmake-fixes.patch
     fi
 fi
 
