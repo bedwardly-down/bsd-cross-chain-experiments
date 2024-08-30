@@ -798,55 +798,61 @@ jobs:
           export TLD=$GITHUB_WORKSPACE
 
           fetch https://download.freebsd.org/releases/amd64/amd64/${{ matrix.version }}-RELEASE/base.txz
-          mkdir -pv ${{ steps.define.outputs.sysroot_dir }}
-          cd $TLD/${{ steps.define.outputs.sysroot_dir }}
+          mkdir -pv $TLD/${{ steps.define.outputs.sysroot_dir }} $TLD/builder
+          cd $TLD/builder
           tar xf $TLD/base.txz
 
-          # Grab required libraries
           pkg bootstrap -f -y
           pkg update
-          pkg install -y llvm${{ env.CLANG_VERSION }}-lite gcc${{ env.GCC_VERSION }} ${{ steps.runner.outputs.bsd_thirdparty_deps }}
+          
+          # Gran the required compiler and toolchain
+          pkg install -y llvm${{ env.CLANG_VERSION }} gcc${{ env.GCC_VERSION }} 
 
-          # Copy libraries to sysroot
-          cp -rf /usr/local usr
+          # Copy toolchain to sysroot
+          cd $TLD/${{ steps.define.outputs.sysroot_dir }}
+          cp -rf /usr/local/llvm${{ env.CLANG_VERSION }}/* .
+          mv -v /usr/local/lib/gcc${{ env.GCC_VERSION }}/include/* include
+          rm -rf /usr/local/lib/gcc${{ env.GCC_VERSION }}/gcc
+          find $TLD/builder/usr/lib -type f -name "*crt*.o" -prune -exec mv -v '{}' lib \;
+          find /usr/local/lib/gcc${{ env.GCC_VERSION }} -type f -name "lib*" -prune -exec mv -v '{}' lib \;
 
-          # Remove excess files from sysroot
-          chflags -R noschg .
-          pkg -c . clean -ay
-          find . -type f -name "*.pkg*" -prune -exec rm -rf '{}' \+
-          find . -type d -name "boot" -prune -exec rm -rf '{}' \+
-          find . -type d -name "dev" -prune -exec rm -rf '{}' \+
-          find . -type d -name "proc" -prune -exec rm -rf '{}' \+
-          find . -type d -name "etc" -prune -exec rm -rf '{}' \+
-          find . -type d -name "tmp" -prune -exec rm -rf '{}' \+
-          find . -type d -name "src" -prune -exec rm -rf '{}' \+
-          find . -type d -name "tests" -prune -exec rm -rf '{}' \+
-          find . -type d -name "icons" -prune -exec rm -rf '{}' \+
-          find . -type d -name "etc" -prune -exec rm -rf '{}' \+
-          find . -type d -name "nls" -prune -exec rm -rf '{}' \+
-          find . -type d -name "locales" -prune -exec rm -rf '{}' \+
-          find . -type d -name "fonts" -prune -exec rm -rf '{}' \+
-          find . -type d -name "root" -prune -exec rm -rf '{}' \+
-          find . -type d -name "restore" -prune -exec rm -rf '{}' \+
-          find . -type d -name "rescue" -prune -exec rm -rf '{}' \+
-          find . -type d -name "html" -prune -exec rm -rf '{}' \+
-          find . -type d -name "doc" -prune -exec rm -rf '{}' \+
-          find . -type d -name "man" -prune -exec rm -rf '{}' \+
-          find . -type d -name "*bin" -prune -exec rm -rf '{}' \+
-          find . -type d -name "db" -prune -exec rm -rf '{}' \+
-          find . -type d -name "sendmail" -prune -exec rm -rf '{}' \+
-          find . -type d -name "empty" -prune -exec rm -rf '{}' \+
-          find . -type d -name "cache" -prune -exec rm -rf '{}' \+
-          find . -type d -name "logs" -prune -exec rm -rf '{}' \+
-          find . -type f -name "*.gz" -prune -exec rm -rf '{}' \+
-          find . -type f -name "*.bz2" -prune -exec rm -rf '{}' \+
-          find . -type f -name "*.xz" -prune -exec rm -rf '{}' \+
-          find . -type f -name "*.html" -prune -exec rm -rf '{}' \;
-          rm -rf sys media mnt
-
-          # Prepare sysroot for usage
+          ## Remove excess files from sysroot
+          #chflags -R noschg .
+          #pkg -c . clean -ay
+          #find . -type f -name "*.pkg*" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "boot" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "dev" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "proc" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "etc" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "tmp" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "src" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "tests" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "icons" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "etc" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "nls" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "locales" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "fonts" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "root" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "restore" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "rescue" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "html" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "doc" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "man" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "*bin" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "db" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "sendmail" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "empty" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "cache" -prune -exec rm -rf '{}' \+
+          #find . -type d -name "logs" -prune -exec rm -rf '{}' \+
+          #find . -type f -name "*.gz" -prune -exec rm -rf '{}' \+
+          #find . -type f -name "*.bz2" -prune -exec rm -rf '{}' \+
+          #find . -type f -name "*.xz" -prune -exec rm -rf '{}' \+
+          #find . -type f -name "*.html" -prune -exec rm -rf '{}' \;
+          #rm -rf sys media mnt
+          #
+          ## Prepare sysroot for usage
           cd $TLD
-          rm -rf base.txz
+          rm -rf builder base.tar.xz
 
           tar c ${{ env.SYSROOT_DIR }} | xz -9 > freebsd.tar.xz
           rm -rf ${{ env.SYSROOT_DIR }}
