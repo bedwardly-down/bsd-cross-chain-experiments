@@ -1,0 +1,4195 @@
+From b6c7b19f57d95eb87967c48636674afc4ae37220 Mon Sep 17 00:00:00 2001
+From: Brad D <social@brandongrows.me>
+Date: Sat, 31 Aug 2024 20:36:36 -0500
+Subject: [PATCH] bmake build fix
+
+---
+ Makefile.inc1                                 | 240 +++++++--------
+ contrib/bmake/meta.h                          |   1 +
+ contrib/bmake/mk/meta.sys.mk                  |   4 +
+ .../varname-dot-make-path_filemon.mk          |   3 +-
+ share/mk/Makefile                             |   2 +-
+ share/mk/auto.obj.mk                          |  10 +-
+ share/mk/bsd.compiler.mk                      |  48 +--
+ share/mk/bsd.confs.mk                         |   8 +-
+ share/mk/bsd.cpu.mk                           | 282 +++++++++---------
+ share/mk/bsd.endian.mk                        |  18 +-
+ share/mk/bsd.files.mk                         |  14 +-
+ share/mk/bsd.init.mk                          |  12 +-
+ share/mk/bsd.lib.mk                           |  50 ++--
+ share/mk/bsd.libnames.mk                      |   2 +-
+ share/mk/bsd.linker.mk                        |  12 +-
+ share/mk/bsd.obj.mk                           |  12 +-
+ share/mk/bsd.prog.mk                          |  60 ++--
+ share/mk/bsd.subdir.mk                        |  12 +-
+ share/mk/bsd.sys.mk                           |  74 ++---
+ share/mk/dirdeps-targets.mk                   |   6 +-
+ share/mk/dirdeps.mk                           |  44 +--
+ share/mk/gendirdeps.mk                        |  22 +-
+ share/mk/local.autodep.mk                     |   2 +-
+ share/mk/local.dirdeps.mk                     |  28 +-
+ share/mk/local.gendirdeps.mk                  |   6 +-
+ share/mk/local.init.mk                        |  12 +-
+ share/mk/local.sys.mk                         |  10 +-
+ share/mk/meta.autodep.mk                      |  28 +-
+ share/mk/meta.stage.mk                        |  20 +-
+ share/mk/meta.sys.mk                          |  18 +-
+ share/mk/src.init.mk                          |   6 +-
+ share/mk/src.libnames.mk                      |  50 ++--
+ share/mk/src.opts.mk                          |  80 ++---
+ share/mk/src.sys.env.mk                       |   6 +-
+ share/mk/src.sys.obj.mk                       |  17 +-
+ share/mk/sys.dependfile.mk                    |   4 +-
+ share/mk/sys.dirdeps.mk                       |  16 +-
+ tools/build/Makefile                          |  24 +-
+ tools/build/mk/Makefile.boot                  |   6 +-
+ tools/build/mk/Makefile.boot.pre              |   2 +-
+ 40 files changed, 639 insertions(+), 632 deletions(-)
+
+diff --git a/Makefile.inc1 b/Makefile.inc1
+index 12397abee..d1f56192b 100644
+--- a/Makefile.inc1
++++ b/Makefile.inc1
+@@ -133,8 +133,8 @@ _TARGET_CPUTYPE=${TARGET_CPUTYPE}
+ .else
+ _TARGET_CPUTYPE=dummy
+ .endif
+-.if ${TARGET} == "arm"
+-.if ${TARGET_CPUTYPE:M*soft*} == ""
++.if "${TARGET}" == "arm"
++.if "${TARGET_CPUTYPE:M*soft*}" == ""
+ TARGET_TRIPLE_ABI=	gnueabihf
+ .else
+ TARGET_TRIPLE_ABI=	gnueabi
+@@ -166,15 +166,15 @@ _t=		${TARGET_ARCH}/${TARGET}
+ .endif
+ .endfor
+ 
+-.if ${TARGET_ARCH} == "amd64"
++.if "${TARGET_ARCH}" == "amd64"
+ LIBCOMPAT_INCLUDE_DIRS+= i386
+-.elif ${TARGET_ARCH} == "aarch64"
++.elif "${TARGET_ARCH}" == "aarch64"
+ LIBCOMPAT_INCLUDE_DIRS+= arm
+ .endif
+ 
+-.if ${.MAKE.OS} != "FreeBSD"
++.if "${.MAKE.OS}" != "FreeBSD"
+ CROSSBUILD_HOST=${.MAKE.OS}
+-.if ${.MAKE.OS} != "Linux" && ${.MAKE.OS} != "Darwin"
++.if "${.MAKE.OS}" != "Linux" && "${.MAKE.OS}" != "Darwin"
+ .warning Unsupported crossbuild system: ${.MAKE.OS}. Build will probably fail!
+ .endif
+ # We need to force NO_ROOT/DB_FROM_SRC builds when building on other operating
+@@ -187,7 +187,7 @@ DB_FROM_SRC:=	1
+ 
+ # If all targets are disabled for system llvm then don't expect it to work
+ # for cross-builds.
+-.if !defined(TOOLS_PREFIX) && ${MK_LLVM_TARGET_ALL} == "no" && \
++.if !defined(TOOLS_PREFIX) && "${MK_LLVM_TARGET_ALL}" == "no" && \
+     ${MACHINE} != ${TARGET} && ${MACHINE_ARCH} != ${TARGET_ARCH} && \
+     !make(showconfig)
+ MK_SYSTEM_COMPILER=	no
+@@ -224,7 +224,7 @@ _WANT_TOOLCHAIN_CROSS_VARS=	t
+ 
+ # Check if there is a local compiler that can satisfy as an external compiler.
+ # Which compiler is expected to be used?
+-.if ${MK_CLANG_BOOTSTRAP} == "yes"
++.if "${MK_CLANG_BOOTSTRAP}" == "yes"
+ WANT_COMPILER_TYPE=	clang
+ .else
+ WANT_COMPILER_TYPE=
+@@ -232,7 +232,7 @@ WANT_COMPILER_TYPE=
+ 
+ .if !defined(WANT_COMPILER_FREEBSD_VERSION) && !make(showconfig) && \
+     !make(test-system-linker)
+-.if ${WANT_COMPILER_TYPE} == "clang"
++.if "${WANT_COMPILER_TYPE}" == "clang"
+ WANT_COMPILER_FREEBSD_VERSION_FILE= lib/clang/freebsd_cc_version.h
+ WANT_COMPILER_FREEBSD_VERSION!= \
+ 	awk '$$2 == "FREEBSD_CC_VERSION" {printf("%d\n", $$3)}' \
+@@ -249,12 +249,12 @@ WANT_COMPILER_VERSION!= \
+ # If the expected vs CC is different then we can't skip.
+ # GCC cannot be used for cross-arch yet.  For clang we pass -target later if
+ # TARGET_ARCH!=MACHINE_ARCH.
+-.if ${MK_SYSTEM_COMPILER} == "yes" && \
++.if "${MK_SYSTEM_COMPILER}" == "yes" && \
+     defined(WANT_COMPILER_FREEBSD_VERSION) && \
+-    ${MK_CLANG_BOOTSTRAP} == "yes" && \
++    "${MK_CLANG_BOOTSTRAP}" == "yes" && \
+     !make(xdev*) && \
+     ${X_COMPILER_TYPE} == ${WANT_COMPILER_TYPE} && \
+-    (${X_COMPILER_TYPE} == "clang" || ${TARGET_ARCH} == ${MACHINE_ARCH}) && \
++    ("${X_COMPILER_TYPE}" == "clang" || ${TARGET_ARCH} == ${MACHINE_ARCH}) && \
+     ${X_COMPILER_VERSION} == ${WANT_COMPILER_VERSION} && \
+     ${X_COMPILER_FREEBSD_VERSION} == ${WANT_COMPILER_FREEBSD_VERSION}
+ # Everything matches, disable the bootstrap compiler.
+@@ -266,7 +266,7 @@ USING_SYSTEM_COMPILER=	yes
+ 
+ # Check if there is a local linker that can satisfy as an external linker.
+ # Which linker is expected to be used?
+-.if ${MK_LLD_BOOTSTRAP} == "yes"
++.if "${MK_LLD_BOOTSTRAP}" == "yes"
+ WANT_LINKER_TYPE=		lld
+ .else
+ WANT_LINKER_TYPE=
+@@ -274,7 +274,7 @@ WANT_LINKER_TYPE=
+ 
+ .if !defined(WANT_LINKER_FREEBSD_VERSION) && !make(showconfig) && \
+     !make(test-system-compiler)
+-.if ${WANT_LINKER_TYPE} == "lld"
++.if "${WANT_LINKER_TYPE}" == "lld"
+ WANT_LINKER_FREEBSD_VERSION_FILE= lib/clang/include/lld/Common/Version.inc
+ WANT_LINKER_FREEBSD_VERSION!= \
+ 	awk '$$2 == "LLD_FREEBSD_VERSION" {print $$3}' \
+@@ -290,9 +290,9 @@ WANT_LINKER_FREEBSD_VERSION=
+ .export WANT_LINKER_FREEBSD_VERSION WANT_LINKER_VERSION
+ .endif	# !defined(WANT_LINKER_FREEBSD_VERSION)
+ 
+-.if ${MK_SYSTEM_LINKER} == "yes" && \
++.if "${MK_SYSTEM_LINKER}" == "yes" && \
+     defined(WANT_LINKER_FREEBSD_VERSION) && \
+-    (${MK_LLD_BOOTSTRAP} == "yes") && \
++    ("${MK_LLD_BOOTSTRAP}" == "yes") && \
+     !make(xdev*) && \
+     ${X_LINKER_TYPE} == ${WANT_LINKER_TYPE} && \
+     ${X_LINKER_VERSION} == ${WANT_LINKER_VERSION} && \
+@@ -333,14 +333,14 @@ test-system-${_t}: .PHONY
+ .endfor
+ .if (make(buildworld) || make(buildkernel) || make(kernel-toolchain) || \
+     make(toolchain) || make(_cross-tools))
+-.if ${USING_SYSTEM_COMPILER} == "yes"
++.if "${USING_SYSTEM_COMPILER}" == "yes"
+ .info SYSTEM_COMPILER: Determined that CC=${CC} matches the source tree.  Not bootstrapping a cross-compiler.
+-.elif ${MK_CLANG_BOOTSTRAP} == "yes"
++.elif "${MK_CLANG_BOOTSTRAP}" == "yes"
+ .info SYSTEM_COMPILER: libclang will be built for bootstrapping a cross-compiler.
+ .endif
+-.if ${USING_SYSTEM_LINKER} == "yes"
++.if "${USING_SYSTEM_LINKER}" == "yes"
+ .info SYSTEM_LINKER: Determined that LD=${LD} matches the source tree.  Not bootstrapping a cross-linker.
+-.elif ${MK_LLD_BOOTSTRAP} == "yes"
++.elif "${MK_LLD_BOOTSTRAP}" == "yes"
+ .info SYSTEM_LINKER: libclang will be built for bootstrapping a cross-linker.
+ .endif
+ .endif
+@@ -390,7 +390,7 @@ SUBDIR=	lib libexec
+ _REDUNDANT_LIB_DIRS+=    ${LOCAL_LIB_DIRS:M${_DIR}*}
+ .endfor
+ .for _DIR in ${LOCAL_LIB_DIRS}
+-.if ${_DIR} == ".WAIT" || (empty(_REDUNDANT_LIB_DIRS:M${_DIR}) && exists(${.CURDIR}/${_DIR}/Makefile))
++.if "${_DIR}" == ".WAIT" || (empty(_REDUNDANT_LIB_DIRS:M${_DIR}) && exists(${.CURDIR}/${_DIR}/Makefile))
+ SUBDIR+=	${_DIR}
+ .endif
+ .endfor
+@@ -399,28 +399,28 @@ SUBDIR+=	${_DIR}
+ SUBDIR+=.WAIT
+ .endif
+ SUBDIR+=bin
+-.if ${MK_CDDL} != "no"
++.if "${MK_CDDL}" != "no"
+ SUBDIR+=cddl
+ .endif
+ SUBDIR+=gnu include
+-.if ${MK_KERBEROS} != "no"
++.if "${MK_KERBEROS}" != "no"
+ SUBDIR+=kerberos5
+ .endif
+-.if ${MK_RESCUE} != "no"
++.if "${MK_RESCUE}" != "no"
+ SUBDIR+=rescue
+ .endif
+ SUBDIR+=sbin
+-.if ${MK_CRYPT} != "no"
++.if "${MK_CRYPT}" != "no"
+ SUBDIR+=secure
+ .endif
+ .if !defined(NO_SHARE)
+ SUBDIR+=share
+ .endif
+-.if ${MK_BOOT} != "no"
++.if "${MK_BOOT}" != "no"
+ SUBDIR+=stand
+ .endif
+ SUBDIR+=sys usr.bin usr.sbin
+-.if ${MK_TESTS} != "no"
++.if "${MK_TESTS}" != "no"
+ SUBDIR+=	tests
+ .endif
+ 
+@@ -428,7 +428,7 @@ SUBDIR+=	tests
+ # Users may insert a .WAIT directive at the beginning or elsewhere within
+ # the LOCAL_DIRS and LOCAL_LIB_DIRS lists as needed.
+ .for _DIR in ${LOCAL_DIRS}
+-.if ${_DIR} == ".WAIT" || exists(${.CURDIR}/${_DIR}/Makefile)
++.if "${_DIR}" == ".WAIT" || exists(${.CURDIR}/${_DIR}/Makefile)
+ SUBDIR+=	${_DIR}
+ .endif
+ .endfor
+@@ -463,7 +463,7 @@ MK_CLEAN:=	no
+ NO_OBJWALK=	t
+ .endif
+ 
+-.if ${MK_META_MODE} == "yes"
++.if "${MK_META_MODE}" == "yes"
+ # If filemon is used then we can rely on the build being incremental-safe.
+ # The .meta files will also track the build command and rebuild should
+ # it change.
+@@ -471,7 +471,7 @@ NO_OBJWALK=	t
+ MK_CLEAN:=	no
+ .endif
+ .endif
+-.if defined(NO_OBJWALK) || ${MK_AUTO_OBJ} == "yes"
++.if defined(NO_OBJWALK) || "${MK_AUTO_OBJ}" == "yes"
+ NO_OBJWALK=	t
+ NO_KERNELOBJ=	t
+ .endif
+@@ -592,7 +592,7 @@ BUILD_ARCH!=	uname -p
+ # On some Linux systems uname -p returns "unknown" so skip this check there.
+ # This check only exists to tell people to use TARGET_ARCH instead of
+ # MACHINE_ARCH so skipping it when crossbuilding on non-FreeBSD should be fine.
+-.if ${MACHINE_ARCH} != ${BUILD_ARCH} && ${.MAKE.OS} == "FreeBSD"
++.if ${MACHINE_ARCH} != ${BUILD_ARCH} && "${.MAKE.OS}" == "FreeBSD"
+ .error To cross-build, set TARGET_ARCH.
+ .endif
+ .endif
+@@ -641,7 +641,7 @@ MKTEMP=mktemp
+ .endif
+ INSTALLTMP!=	${MKTEMP} -d -u -t install
+ 
+-.if ${.MAKE.OS} == "FreeBSD"
++.if "${.MAKE.OS}" == "FreeBSD"
+ # When building on FreeBSD we always copy the host tools instead of linking
+ # into INSTALLTMP to avoid issues with incompatible libraries (see r364030).
+ # Note: we could create links if we don't intend to update the current machine.
+@@ -701,7 +701,7 @@ CROSSENV+=	\
+ 		MACHINE_ARCH=${TARGET_ARCH} \
+ 		MACHINE=${TARGET} \
+ 		CPUTYPE=${TARGET_CPUTYPE}
+-.if ${MK_META_MODE} != "no"
++.if "${MK_META_MODE}" != "no"
+ # Don't rebuild build-tools targets during normal build.
+ CROSSENV+=	BUILD_TOOLS_META=.NOMETA
+ .endif
+@@ -867,7 +867,7 @@ XCFLAGS+=	${BFLAGS}
+ 
+ .include "share/mk/bsd.compat.pre.mk"
+ .for LIBCOMPAT in ${_ALL_LIBCOMPATS}
+-.if ${MK_LIB${LIBCOMPAT}} == "yes"
++.if "${MK_LIB${LIBCOMPAT}}" == "yes"
+ _LIBCOMPATS+=	${LIBCOMPAT}
+ .endif
+ .endfor
+@@ -877,7 +877,7 @@ _LIBCOMPATS+=	${LIBCOMPAT}
+ # timestamps (see NO_META_IGNORE_HOST in sys.mk).  There are known times
+ # when the ABI breaks though that we want to force rebuilding WORLDTMP
+ # to get updated host tools.
+-.if ${MK_META_MODE} == "yes" && ${MK_CLEAN} == "no" && \
++.if "${MK_META_MODE}" == "yes" && "${MK_CLEAN}" == "no" && \
+     !defined(NO_META_IGNORE_HOST) && !defined(NO_META_IGNORE_HOST_HEADERS) && \
+     !defined(_MKSHOWCONFIG)
+ # r318736 - ino64 major ABI breakage
+@@ -1038,7 +1038,7 @@ _cleanobj_fast_depend_hack: .PHONY
+ 	    sh ${.CURDIR}/tools/build/depend-cleanup.sh ${OBJTOP}
+ 
+ _cleanworldtmp: .PHONY
+-.if ${MK_CLEAN} == "yes"
++.if "${MK_CLEAN}" == "yes"
+ 	@echo
+ 	@echo "--------------------------------------------------------------"
+ 	@echo ">>> Cleaning up the temporary build tree"
+@@ -1056,7 +1056,7 @@ _cleanworldtmp: .PHONY
+ 		    delete-old-libs >/dev/null; \
+ 	fi
+ 	rm -rf ${WORLDTMP}/legacy/usr/include
+-.if ${USING_SYSTEM_COMPILER} == "yes"
++.if "${USING_SYSTEM_COMPILER}" == "yes"
+ .for cc in cc c++
+ 	if [ -x ${WORLDTMP}/usr/bin/${cc} ]; then \
+ 		inum=$$(stat -f %i ${WORLDTMP}/usr/bin/${cc}); \
+@@ -1064,7 +1064,7 @@ _cleanworldtmp: .PHONY
+ 	fi
+ .endfor
+ .endif	# ${USING_SYSTEM_COMPILER} == "yes"
+-.if ${USING_SYSTEM_LINKER} == "yes"
++.if "${USING_SYSTEM_LINKER}" == "yes"
+ 	@rm -f ${WORLDTMP}/usr/bin/ld ${WORLDTMP}/usr/bin/ld.lld
+ .endif	# ${USING_SYSTEM_LINKER} == "yes"
+ .endif	# ${MK_CLEAN} == "yes"
+@@ -1095,7 +1095,7 @@ _bootstrap-tools:
+ 	@echo "--------------------------------------------------------------"
+ 	@echo ">>> stage 1.2: bootstrap tools"
+ 	@echo "--------------------------------------------------------------"
+-.if ${MK_CLEAN} != "yes"
++.if "${MK_CLEAN}" != "yes"
+ 	${_+_}cd ${.CURDIR}; ${BMAKE} _NO_INCLUDE_COMPILERMK=t _cleanobj_fast_depend_hack
+ .endif
+ 	${_+_}cd ${.CURDIR}; ${BMAKE} bootstrap-tools
+@@ -1108,7 +1108,7 @@ _bootstrap-tools:
+ 	mkdir -p ${WORLDTMP}/usr/include/${d}
+ .endfor
+ 	ln -sf ${.CURDIR}/sys ${WORLDTMP}
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ 	${WORLDTMP_MTREE} -f ${.CURDIR}/etc/mtree/BSD.debug.dist \
+ 	    -p ${WORLDTMP}/usr/lib >/dev/null
+ .endif
+@@ -1116,7 +1116,7 @@ _bootstrap-tools:
+ 	${WORLDTMP_MTREE} -f ${.CURDIR}/${_mtree} -p ${WORLDTMP} > /dev/null
+ .endfor
+ _cleanobj:
+-.if ${MK_CLEAN} == "yes"
++.if "${MK_CLEAN}" == "yes"
+ 	@echo
+ 	@echo "--------------------------------------------------------------"
+ 	@echo ">>> stage 2.1: cleaning up the object tree"
+@@ -1342,8 +1342,8 @@ __installcheck_UGID: .PHONY
+ # rescue is not functional (e.g., because it depends on a system call not
+ # supported by the currently running kernel), abort the installation.
+ #
+-.if !make(distributeworld) && ${MK_RESCUE} != "no" && \
+-    (empty(DESTDIR) || ${DESTDIR} == "/") && empty(BYPASS_INSTALLCHECK_SH)
++.if !make(distributeworld) && "${MK_RESCUE}" != "no" && \
++    (empty(DESTDIR) || "${DESTDIR}" == "/") && empty(BYPASS_INSTALLCHECK_SH)
+ _installcheck_world: __installcheck_sh_check
+ __installcheck_sh_check: .PHONY
+ 	@if [ "`${OBJTOP}/rescue/rescue/rescue sh -c 'echo OK'`" != \
+@@ -1365,12 +1365,12 @@ ITOOLS=	[ awk cap_mkdb cat chflags chmod chown cmp cp \
+ 	ln make mkdir mtree mv pwd_mkdb \
+ 	rm sed services_mkdb sh sort strip ${_sysctl} test time true uname wc
+ 
+-.if ${MK_ZONEINFO} != "no"
++.if "${MK_ZONEINFO}" != "no"
+ ITOOLS+=tzsetup
+ .endif
+ 
+ # Needed for share/man
+-.if ${MK_MAN_UTILS} != "no"
++.if "${MK_MAN_UTILS}" != "no"
+ ITOOLS+=makewhatis
+ .endif
+ 
+@@ -1391,12 +1391,12 @@ EXTRA_DISTRIBUTIONS=
+ .for libcompat in ${libcompats}
+ EXTRA_DISTRIBUTIONS+=	lib${libcompat}
+ .endfor
+-.if ${MK_TESTS} != "no"
++.if "${MK_TESTS}" != "no"
+ EXTRA_DISTRIBUTIONS+=	tests
+ .endif
+ 
+ DEBUG_DISTRIBUTIONS=
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ DEBUG_DISTRIBUTIONS+=	base ${EXTRA_DISTRIBUTIONS:S,tests,,}
+ .endif
+ 
+@@ -1442,23 +1442,23 @@ distributeworld installworld stageworld: _installcheck_world .PHONY
+ .for d in ${LIBCOMPAT_INCLUDE_DIRS}
+ 	-mkdir ${DESTDIR}/${DISTDIR}/${dist}/usr/include/${d}
+ .endfor
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ 	${DESTDIR_MTREE} -f ${.CURDIR}/etc/mtree/BSD.debug.dist \
+ 	    -p ${DESTDIR}/${DISTDIR}/${dist}/usr/lib >/dev/null
+ .endif
+ .for libcompat in ${libcompats}
+ 	${DESTDIR_MTREE} -f ${.CURDIR}/etc/mtree/BSD.lib${libcompat}.dist \
+ 	    -p ${DESTDIR}/${DISTDIR}/${dist}/usr >/dev/null
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ 	${DESTDIR_MTREE} -f ${.CURDIR}/etc/mtree/BSD.lib${libcompat}.dist \
+ 	    -p ${DESTDIR}/${DISTDIR}/${dist}/usr/lib/debug/usr >/dev/null
+ .endif
+ .endfor
+-.if ${MK_TESTS} != "no" && ${dist} == "tests"
++.if "${MK_TESTS}" != "no" && "${dist}" == "tests"
+ 	-mkdir -p ${DESTDIR}/${DISTDIR}/${dist}${TESTSBASE}
+ 	${DESTDIR_MTREE} -f ${.CURDIR}/etc/mtree/BSD.tests.dist \
+ 	    -p ${DESTDIR}/${DISTDIR}/${dist}${TESTSBASE} >/dev/null
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ 	${DESTDIR_MTREE} -f ${.CURDIR}/etc/mtree/BSD.tests.dist \
+ 	    -p ${DESTDIR}/${DISTDIR}/${dist}/usr/lib/debug/${TESTSBASE} >/dev/null
+ .endif
+@@ -1488,7 +1488,7 @@ distributeworld installworld stageworld: _installcheck_world .PHONY
+ .endif # make(distributeworld)
+ 	${_+_}cd ${.CURDIR}; ${IMAKE} re${.TARGET:S/world$//}; \
+ 	    ${IMAKEENV} rm -rf ${INSTALLTMP}
+-.if !make(packageworld) && ${MK_CAROOT} != "no"
++.if !make(packageworld) && "${MK_CAROOT}" != "no"
+ 	@if which openssl>/dev/null; then \
+ 		PATH=${TMPPATH:Q}:${PATH:Q} \
+ 		    sh ${SRCTOP}/usr.sbin/certctl/certctl.sh ${CERTCTLFLAGS} rehash; \
+@@ -1674,15 +1674,15 @@ NO_KERNELCLEAN=	t
+ NO_KERNELCONFIG=	t
+ NO_KERNELOBJ=		t
+ # Shortcut for KERNCONF=Blah -DKERNFAST is now KERNFAST=Blah
+-.if !defined(KERNCONF) && ${KERNFAST} != "1"
++.if !defined(KERNCONF) && "${KERNFAST}" != "1"
+ KERNCONF=${KERNFAST}
+ .endif
+ .endif
+-.if ${TARGET_ARCH} == "powerpc64"
++.if "${TARGET_ARCH}" == "powerpc64"
+ KERNCONF?=	GENERIC64
+-.elif ${TARGET_ARCH} == "powerpc64le"
++.elif "${TARGET_ARCH}" == "powerpc64le"
+ KERNCONF?=	GENERIC64LE
+-.elif ${TARGET_ARCH} == "powerpcspe"
++.elif "${TARGET_ARCH}" == "powerpcspe"
+ KERNCONF?=	MPC85XXSPE
+ .else
+ KERNCONF?=	GENERIC
+@@ -1763,7 +1763,7 @@ buildkernel: .MAKE .PHONY
+ 			-I '${KERNCONFDIR}' -I '${KRNLCONFDIR}' \
+ 			'${KERNCONFDIR}/${_kernel}'
+ .endif
+-.if ${MK_CLEAN} == "yes" && !defined(NO_KERNELCLEAN)
++.if "${MK_CLEAN}" == "yes" && !defined(NO_KERNELCLEAN)
+ 	@echo
+ 	@echo "--------------------------------------------------------------"
+ 	@echo ">>> stage 2.1: cleaning up the object tree"
+@@ -1892,7 +1892,7 @@ packagekernel: .PHONY
+ 	    @${DESTDIR}/${DISTDIR}/kernel.meta | \
+ 	    ${XZ_CMD} > ${PACKAGEDIR}/kernel.txz
+ .endif
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ 	cd ${DESTDIR}/${DISTDIR}/kernel; \
+ 	    ${TAR_CMD} cvf - --include '*/*/*.debug' \
+ 	    @${DESTDIR}/${DISTDIR}/kernel.meta | \
+@@ -1904,7 +1904,7 @@ packagekernel: .PHONY
+ 	    ${TAR_CMD} cvf - --exclude '*.debug' \
+ 	    @${DESTDIR}/${DISTDIR}/kernel.${_kernel}.meta | \
+ 	    ${XZ_CMD} > ${PACKAGEDIR}/kernel.${_kernel}.txz
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ 	cd ${DESTDIR}/${DISTDIR}/kernel.${_kernel}; \
+ 	    ${TAR_CMD} cvf - --include '*/*/*.debug' \
+ 	    @${DESTDIR}/${DISTDIR}/kernel.${_kernel}.meta | \
+@@ -1918,7 +1918,7 @@ packagekernel: .PHONY
+ 	    ${TAR_CMD} cvf - --exclude '*.debug' . | \
+ 	    ${XZ_CMD} > ${PACKAGEDIR}/kernel.txz
+ .endif
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ 	cd ${DESTDIR}/${DISTDIR}/kernel; \
+ 	    ${TAR_CMD} cvf - --include '*/*/*.debug' $$(eval find .) | \
+ 	    ${XZ_CMD} > ${DESTDIR}/${DISTDIR}/kernel-dbg.txz
+@@ -1928,7 +1928,7 @@ packagekernel: .PHONY
+ 	cd ${DESTDIR}/${DISTDIR}/kernel.${_kernel}; \
+ 	    ${TAR_CMD} cvf - --exclude '*.debug' . | \
+ 	    ${XZ_CMD} > ${PACKAGEDIR}/kernel.${_kernel}.txz
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ 	cd ${DESTDIR}/${DISTDIR}/kernel.${_kernel}; \
+ 	    ${TAR_CMD} cvf - --include '*/*/*.debug' $$(eval find .) | \
+ 	    ${XZ_CMD} > ${DESTDIR}/${DISTDIR}/kernel.${_kernel}-dbg.txz
+@@ -2100,7 +2100,7 @@ create-world-package-${pkgname}: .PHONY
+ 
+ _default_flavor=	-default
+ .if make(*package*) && exists(${KSTAGEDIR}/kernel.meta)
+-. if ${MK_DEBUG_FILES} != "no"
++. if "${MK_DEBUG_FILES}" != "no"
+ _debug=-dbg
+ . endif
+ create-kernel-packages:	.PHONY
+@@ -2137,7 +2137,7 @@ create-kernel-packages-flavor${flavor:C,^""$,${_default_flavor},}: _pkgbootstrap
+ .if ${BUILDKERNELS:[#]} > 1 && ${NO_INSTALLEXTRAKERNELS} != "yes"
+ . for _kernel in ${BUILDKERNELS:[2..-1]}
+ .  if exists(${KSTAGEDIR}/kernel.${_kernel}.meta)
+-.   if ${MK_DEBUG_FILES} != "no"
++.   if "${MK_DEBUG_FILES}" != "no"
+ _debug=-dbg
+ .   endif
+ .   for flavor in "" ${_debug}
+@@ -2287,7 +2287,7 @@ BOOTSTRAP_ALL_TOOLS:=	1
+ BOOTSTRAPPING_OSRELDATE:=	0
+ .endif
+ 
+-.if ${MK_GAMES} != "no"
++.if "${MK_GAMES}" != "no"
+ _strfile=	usr.bin/fortune/strfile
+ .endif
+ 
+@@ -2296,7 +2296,7 @@ _strfile=	usr.bin/fortune/strfile
+ _vtfontcvt=	usr.bin/vtfontcvt
+ 
+ # zic is used to compile timezone data
+-.if ${MK_ZONEINFO} != "no"
++.if "${MK_ZONEINFO}" != "no"
+ _zic=		usr.sbin/zic
+ .endif
+ 
+@@ -2392,7 +2392,7 @@ _kbdcontrol=	usr.sbin/kbdcontrol
+ _bootstrap_tools_links+=kbdcontrol
+ .endif
+ 
+-.if ${MK_DISK_IMAGE_TOOLS_BOOTSTRAP} != "no"
++.if "${MK_DISK_IMAGE_TOOLS_BOOTSTRAP}" != "no"
+ _etdump=	usr.bin/etdump
+ _makefs=	usr.sbin/makefs
+ 
+@@ -2408,7 +2408,7 @@ ${_bt}-usr.sbin/makefs: ${_bt}-lib/libsbuf
+ # 1300102: VHDX support
+ .if ${BOOTSTRAPPING} < 1201520 || \
+ 	(${BOOTSTRAPPING} > 1300000 && ${BOOTSTRAPPING} < 1300102) || \
+-	${MK_DISK_IMAGE_TOOLS_BOOTSTRAP} != "no"
++	"${MK_DISK_IMAGE_TOOLS_BOOTSTRAP}" != "no"
+ _mkimg=	usr.bin/mkimg
+ .else
+ _bootstrap_tools_links+=mkimg
+@@ -2416,7 +2416,7 @@ _bootstrap_tools_links+=mkimg
+ 
+ _yacc=		usr.bin/yacc
+ 
+-.if ${MK_BSNMP} != "no"
++.if "${MK_BSNMP}" != "no"
+ _gensnmptree=	usr.sbin/bsnmpd/gensnmptree
+ .endif
+ 
+@@ -2424,18 +2424,18 @@ _gensnmptree=	usr.sbin/bsnmpd/gensnmptree
+ # We need to build tblgen when we're building clang or lld, either as
+ # bootstrap tools, or as the part of the normal build.
+ # llvm-tblgen is also needed for various llvm binutils (e.g. objcopy).
+-.if ${MK_CLANG_BOOTSTRAP} != "no" || ${MK_CLANG} != "no" || \
+-    ${MK_LLD_BOOTSTRAP} != "no" || ${MK_LLD} != "no" || \
+-    ${MK_LLDB} != "no" || ${MK_LLVM_BINUTILS} != "no"
++.if "${MK_CLANG_BOOTSTRAP}" != "no" || "${MK_CLANG}" != "no" || \
++    "${MK_LLD_BOOTSTRAP}" != "no" || "${MK_LLD}" != "no" || \
++    "${MK_LLDB}" != "no" || "${MK_LLVM_BINUTILS}" != "no"
+ _clang_tblgen= \
+ 	lib/clang/libllvmminimal \
+ 	usr.bin/clang/llvm-tblgen
+-.if ${MK_CLANG_BOOTSTRAP} != "no" || ${MK_CLANG} != "no" || \
+-    ${MK_LLDB} != "no"
++.if "${MK_CLANG_BOOTSTRAP}" != "no" || "${MK_CLANG}" != "no" || \
++    "${MK_LLDB}" != "no"
+ _clang_tblgen+=	lib/clang/libclangminimal
+ _clang_tblgen+= usr.bin/clang/clang-tblgen
+ .endif
+-.if ${MK_LLDB} != "no"
++.if "${MK_LLDB}" != "no"
+ _clang_tblgen+=	usr.bin/clang/lldb-tblgen
+ .endif
+ ${_bt}-usr.bin/clang/clang-tblgen: ${_bt}-lib/clang/libllvmminimal
+@@ -2447,14 +2447,14 @@ ${_bt}-usr.bin/clang/lldb-tblgen: ${_bt}-lib/clang/libllvmminimal
+ _localedef=	usr.bin/localedef
+ ${_bt}-usr.bin/localedef: ${_bt}-usr.bin/yacc ${_bt_lex_depend}
+ 
+-.if ${MK_ICONV} != "no"
++.if "${MK_ICONV}" != "no"
+ _mkesdb=	usr.bin/mkesdb
+ _mkcsmapper=	usr.bin/mkcsmapper
+ ${_bt}-usr.bin/mkesdb: ${_bt}-usr.bin/yacc ${_bt_lex_depend}
+ ${_bt}-usr.bin/mkcsmapper: ${_bt}-usr.bin/yacc ${_bt_lex_depend}
+ .endif
+ 
+-.if ${MK_KERBEROS} != "no"
++.if "${MK_KERBEROS}" != "no"
+ _kerberos5_bootstrap_tools= \
+ 	kerberos5/tools/make-roken \
+ 	kerberos5/lib/libroken \
+@@ -2521,13 +2521,13 @@ _basic_bootstrap_tools+=usr.bin/mkfifo
+ # jot is needed for the mkimg tests
+ _basic_bootstrap_tools+=usr.bin/jot
+ 
+-.if ${MK_BOOT} != "no"
++.if "${MK_BOOT}" != "no"
+ # md5 is used by boot/beri (and possibly others)
+ _basic_bootstrap_tools+=sbin/md5
+ .endif
+ 
+ # tzsetup is needed as an install tool
+-.if ${MK_ZONEINFO} != "no"
++.if "${MK_ZONEINFO}" != "no"
+ _basic_bootstrap_tools+=usr.sbin/tzsetup
+ .endif
+ 
+@@ -2649,25 +2649,25 @@ ${_bt}-sbin/md5: ${_bt}-lib/libmd
+ _share=	share/syscons/scrnmaps
+ .endif
+ 
+-.if ${MK_RESCUE} != "no"
++.if "${MK_RESCUE}" != "no"
+ # rescue includes programs that have build-tools targets
+ _rescue=rescue/rescue
+ .endif
+ 
+-.if ${MK_TCSH} != "no"
++.if "${MK_TCSH}" != "no"
+ _tcsh=bin/csh
+ .endif
+-.if ${MK_FILE} != "no"
++.if "${MK_FILE}" != "no"
+ _libmagic=lib/libmagic
+ .endif
+ 
+-.if ${MK_PMC} != "no"
++.if "${MK_PMC}" != "no"
+ _jevents=lib/libpmc/pmu-events
+ .endif
+ 
+ # kernel-toolchain skips _cleanobj, so handle cleaning up previous
+ # build-tools directories if needed.
+-.if ${MK_CLEAN} == "yes" && make(kernel-toolchain)
++.if "${MK_CLEAN}" == "yes" && make(kernel-toolchain)
+ _bt_clean=	${CLEANDIR}
+ .endif
+ 
+@@ -2705,21 +2705,21 @@ kernel-tools: .PHONY
+ # to begin building the target binaries.
+ #
+ .if ${TARGET_ARCH} != ${MACHINE_ARCH} || ${BUILD_WITH_STRICT_TMPPATH} != 0
+-.if ${TARGET_ARCH} == "amd64" || ${TARGET_ARCH} == "i386"
++.if "${TARGET_ARCH}" == "amd64" || "${TARGET_ARCH}" == "i386"
+ _btxld=		usr.sbin/btxld
+ .endif
+ .endif
+ 
+ # Rebuild ctfconvert and ctfmerge to avoid difficult-to-diagnose failures
+ # resulting from missing bug fixes or ELF Toolchain updates.
+-.if ${MK_CDDL} != "no"
++.if "${MK_CDDL}" != "no"
+ _dtrace_tools= cddl/lib/libctf cddl/lib/libspl cddl/usr.bin/ctfconvert \
+     cddl/usr.bin/ctfmerge
+ .endif
+ 
+ # If we're given an XAS, don't build binutils.
+ .if ${XAS:M/*} == ""
+-.if ${MK_ELFTOOLCHAIN_BOOTSTRAP} != "no"
++.if "${MK_ELFTOOLCHAIN_BOOTSTRAP}" != "no"
+ _elftctools=	lib/libelftc \
+ 		lib/libpe \
+ 		usr.bin/elfctl \
+@@ -2732,7 +2732,7 @@ _elftctools=	lib/libelftc \
+ # cross-build on a FreeBSD 10 host:
+ _elftctools+=	usr.bin/addr2line
+ .endif
+-.elif ${TARGET_ARCH} != ${MACHINE_ARCH} && ${MK_ELFTOOLCHAIN_BOOTSTRAP} != "no"
++.elif ${TARGET_ARCH} != ${MACHINE_ARCH} && "${MK_ELFTOOLCHAIN_BOOTSTRAP}" != "no"
+ # If cross-building with an external binutils we still need to build strip for
+ # the target (for at least crunchide).
+ _elftctools=	lib/libelftc \
+@@ -2742,16 +2742,16 @@ _elftctools=	lib/libelftc \
+ 		usr.bin/objcopy
+ .endif
+ 
+-.if ${MK_CLANG_BOOTSTRAP} != "no"
++.if "${MK_CLANG_BOOTSTRAP}" != "no"
+ _clang=		usr.bin/clang
+ .endif
+-.if ${MK_LLD_BOOTSTRAP} != "no"
++.if "${MK_LLD_BOOTSTRAP}" != "no"
+ _lld=		usr.bin/clang/lld
+ .endif
+-.if ${MK_CLANG_BOOTSTRAP} != "no" || ${MK_LLD_BOOTSTRAP} != "no"
++.if "${MK_CLANG_BOOTSTRAP}" != "no" || "${MK_LLD_BOOTSTRAP}" != "no"
+ _clang_libs=	lib/clang
+ .endif
+-.if ${MK_USB} != "no"
++.if "${MK_USB}" != "no"
+ _usb_tools=	stand/usb/tools
+ .endif
+ 
+@@ -2858,7 +2858,7 @@ NXBDIRS+= \
+     usr.sbin/chown
+ 
+ SUBDIR_DEPEND_usr.bin/clang=	lib/clang
+-.if ${MK_CLANG} != "no"
++.if "${MK_CLANG}" != "no"
+ NXBDIRS+=	lib/clang
+ NXBDIRS+=	usr.bin/clang
+ .endif
+@@ -2914,7 +2914,7 @@ NXBTMAKE=	${NXBMAKEENV} ${MAKE} ${NXBMAKEARGS:N-DNO_PIC:N-DNO_SHARED} \
+ # TARGET/TARGET_ARCH are still passed along from user.
+ #
+ # Use the toolchain we create as an external toolchain.
+-.if ${USING_SYSTEM_COMPILER} == "yes" || ${XCC:N${CCACHE_BIN}:M/*}
++.if "${USING_SYSTEM_COMPILER}" == "yes" || ${XCC:N${CCACHE_BIN}:M/*}
+ NXBMAKE+=	XCC="${XCC}" \
+ 		XCXX="${XCXX}" \
+ 		XCPP="${XCPP}"
+@@ -2989,15 +2989,15 @@ libraries: .MAKE .PHONY
+ # static libgcc.a prerequisite for shared libc
+ #
+ _prereq_libs= lib/libcompiler_rt
+-.if ${MK_SSP} != "no"
++.if "${MK_SSP}" != "no"
+ _prereq_libs+= lib/libssp_nonshared
+ .endif
+-.if ${MK_ASAN} != "no"
++.if "${MK_ASAN}" != "no"
+ _prereq_libs+=	lib/libclang_rt/asan
+ _prereq_libs+=	lib/libclang_rt/asan-preinit
+ _prereq_libs+=	lib/libclang_rt/asan_cxx
+ .endif
+-.if ${MK_UBSAN} != "no"
++.if "${MK_UBSAN}" != "no"
+ _prereq_libs+=	lib/libclang_rt/ubsan_minimal
+ _prereq_libs+=	lib/libclang_rt/ubsan_standalone
+ _prereq_libs+=	lib/libclang_rt/ubsan_standalone_cxx
+@@ -3060,26 +3060,26 @@ _prebuild_libs=	${_kerberos5_lib_libasn1} \
+ 		${_secure_lib_libcrypto} ${_secure_lib_libssl} \
+ 		${_lib_libldns} ${_secure_lib_libssh}
+ 
+-.if ${MK_DIALOG} != "no"
++.if "${MK_DIALOG}" != "no"
+ _prebuild_libs+= gnu/lib/libdialog
+ gnu/lib/libdialog__L: lib/msun__L lib/ncurses/tinfo__L lib/ncurses/ncurses__L
+ .endif
+ 
+-.if ${MK_GOOGLETEST} != "no"
++.if "${MK_GOOGLETEST}" != "no"
+ _prebuild_libs+= lib/libregex
+ .endif
+ 
+ lib/libgeom__L: lib/libexpat__L lib/libsbuf__L
+ lib/libkvm__L: lib/libelf__L
+ 
+-.if ${MK_RADIUS_SUPPORT} != "no"
++.if "${MK_RADIUS_SUPPORT}" != "no"
+ _lib_libradius=	lib/libradius
+ .endif
+ 
+ lib/ncurses/ncurses__L:	lib/ncurses/tinfo__L
+ lib/ncurses/form__L: lib/ncurses/ncurses__L
+ 
+-.if ${MK_OFED} != "no"
++.if "${MK_OFED}" != "no"
+ _prebuild_libs+= \
+ 	lib/ofed/libibverbs \
+ 	lib/ofed/libibmad \
+@@ -3092,7 +3092,7 @@ lib/ofed/complib__L:	lib/libthr__L
+ lib/ofed/libmlx5__L:	lib/ofed/libibverbs__L lib/libthr__L
+ .endif
+ 
+-.if ${MK_CASPER} != "no"
++.if "${MK_CASPER}" != "no"
+ _lib_casper=	lib/libcasper
+ .endif
+ 
+@@ -3103,18 +3103,18 @@ lib/libzstd__L: lib/libthr__L
+ lib/librt__L: lib/libthr__L
+ 
+ _generic_libs=	${_cddl_lib} gnu/lib ${_kerberos5_lib} lib ${_secure_lib}
+-.if ${MK_IPFILTER} != "no"
++.if "${MK_IPFILTER}" != "no"
+ _generic_libs+=	sbin/ipf/libipf
+ .endif
+ .for _DIR in ${LOCAL_LIB_DIRS}
+-.if ${_DIR} == ".WAIT"  || (empty(_generic_libs:M${_DIR}) && exists(${.CURDIR}/${_DIR}/Makefile))
++.if "${_DIR}" == ".WAIT"  || (empty(_generic_libs:M${_DIR}) && exists(${.CURDIR}/${_DIR}/Makefile))
+ _generic_libs+= ${_DIR}
+ .endif
+ .endfor
+ 
+ lib/libtacplus__L: lib/libmd__L lib/libpam/libpam__L
+ 
+-.if ${MK_CDDL} != "no"
++.if "${MK_CDDL}" != "no"
+ _cddl_lib_libumem= cddl/lib/libumem
+ _cddl_lib_libnvpair= cddl/lib/libnvpair
+ _cddl_lib_libavl= cddl/lib/libavl
+@@ -3125,7 +3125,7 @@ cddl/lib/libavl__L: cddl/lib/libspl__L
+ cddl/lib/libnvpair__L: cddl/lib/libspl__L
+ cddl/lib/libuutil__L: cddl/lib/libavl__L cddl/lib/libspl__L
+ 
+-.if ${MK_ZFS} != "no"
++.if "${MK_ZFS}" != "no"
+ _lib_librt= lib/librt
+ _cddl_lib_libicp= cddl/lib/libicp
+ _cddl_lib_libicp_rescue= cddl/lib/libicp_rescue
+@@ -3160,23 +3160,23 @@ lib/libprocstat__L: lib/libelf__L lib/libkvm__L lib/libutil__L
+ lib/libproc__L: lib/libprocstat__L
+ lib/librtld_db__L: lib/libprocstat__L
+ 
+-.if ${MK_CRYPT} != "no"
+-.if ${MK_OPENSSL} != "no"
++.if "${MK_CRYPT}" != "no"
++.if "${MK_OPENSSL}" != "no"
+ _secure_lib_libcrypto= secure/lib/libcrypto
+ _secure_lib_libssl= secure/lib/libssl
+ lib/libradius__L secure/lib/libssl__L: secure/lib/libcrypto__L
+ secure/lib/libcrypto__L: lib/libthr__L
+-.if ${MK_LDNS} != "no"
++.if "${MK_LDNS}" != "no"
+ _lib_libldns= lib/libldns
+ lib/libldns__L: secure/lib/libssl__L
+ .endif
+-.if ${MK_OPENSSH} != "no"
++.if "${MK_OPENSSH}" != "no"
+ _secure_lib_libssh= secure/lib/libssh
+ secure/lib/libssh__L: lib/libz__L secure/lib/libcrypto__L lib/libcrypt__L
+-.if ${MK_LDNS} != "no"
++.if "${MK_LDNS}" != "no"
+ secure/lib/libssh__L: lib/libldns__L
+ .endif
+-.if ${MK_GSSAPI} != "no" && ${MK_KERBEROS_SUPPORT} != "no"
++.if "${MK_GSSAPI}" != "no" && "${MK_KERBEROS_SUPPORT}" != "no"
+ secure/lib/libssh__L: lib/libgssapi__L kerberos5/lib/libkrb5__L \
+     kerberos5/lib/libhx509__L kerberos5/lib/libasn1__L lib/libcom_err__L \
+     lib/libmd__L kerberos5/lib/libroken__L
+@@ -3186,7 +3186,7 @@ secure/lib/libssh__L: lib/libgssapi__L kerberos5/lib/libkrb5__L \
+ _secure_lib=	secure/lib
+ .endif
+ 
+-.if ${MK_KERBEROS} != "no"
++.if "${MK_KERBEROS}" != "no"
+ kerberos5/lib/libasn1__L: lib/libcom_err__L kerberos5/lib/libroken__L
+ kerberos5/lib/libhdb__L: kerberos5/lib/libasn1__L lib/libcom_err__L \
+     kerberos5/lib/libkrb5__L kerberos5/lib/libroken__L \
+@@ -3207,11 +3207,11 @@ kerberos5/lib/libheimipcc__L: kerberos5/lib/libroken__L kerberos5/lib/libheimbas
+ 
+ lib/libsqlite3__L: lib/libthr__L
+ 
+-.if ${MK_GSSAPI} != "no"
++.if "${MK_GSSAPI}" != "no"
+ _lib_libgssapi=	lib/libgssapi
+ .endif
+ 
+-.if ${MK_KERBEROS} != "no"
++.if "${MK_KERBEROS}" != "no"
+ _kerberos5_lib=	kerberos5/lib
+ _kerberos5_lib_libasn1= kerberos5/lib/libasn1
+ _kerberos5_lib_libhdb= kerberos5/lib/libhdb
+@@ -3226,11 +3226,11 @@ _kerberos5_lib_libwind= kerberos5/lib/libwind
+ _libcom_err= lib/libcom_err
+ .endif
+ 
+-.if ${MK_NIS} != "no"
++.if "${MK_NIS}" != "no"
+ _lib_libypclnt=	lib/libypclnt
+ .endif
+ 
+-.if ${MK_OPENSSL} == "no"
++.if "${MK_OPENSSL}" == "no"
+ lib/libradius__L: lib/libmd__L
+ .endif
+ 
+@@ -3522,7 +3522,7 @@ BW_CANONICALOBJDIR:=${OBJTOP}/
+ BW_CANONICALOBJDIR:=${KRNLOBJDIR}/${KERNCONF}/
+ .elif make(cleanuniverse)
+ BW_CANONICALOBJDIR:=${OBJROOT}
+-.if ${MK_UNIFIED_OBJDIR} == "no"
++.if "${MK_UNIFIED_OBJDIR}" == "no"
+ .error ${.TARGETS} only supported with WITH_UNIFIED_OBJDIR enabled.
+ .endif
+ .endif
+@@ -3533,7 +3533,7 @@ cleanworld cleanuniverse cleankernel: .PHONY
+ 	-chflags -R 0 ${BW_CANONICALOBJDIR}
+ 	-(cd ${BW_CANONICALOBJDIR} && rm -rf *)
+ .endif
+-.if make(cleanworld) && ${MK_AUTO_OBJ} == "no" && \
++.if make(cleanworld) && "${MK_AUTO_OBJ}" == "no" && \
+     (empty(BW_CANONICALOBJDIR) || ${.CURDIR:tA} == ${BW_CANONICALOBJDIR:tA})
+ .if ${.CURDIR} == ${.OBJDIR} || ${.CURDIR}/obj == ${.OBJDIR}
+ 	#   To be safe in this case, fall back to a 'make cleandir'
+@@ -3595,7 +3595,7 @@ CDTMP=	${OBJTOP}/${XDDIR}/tmp
+ CDMAKE=${CDENV} PATH=${CDTMP:Q}/usr/bin:${PATH:Q} ${MAKE} ${CDMAKEARGS} ${NOFUN}
+ CD2MAKE=${CD2ENV} PATH=${CDTMP:Q}/usr/bin:${XDDESTDIR:Q}/usr/bin:${PATH:Q} \
+ 	${MAKE} ${CD2MAKEARGS} ${NOFUN}
+-.if ${MK_META_MODE} != "no"
++.if "${MK_META_MODE}" != "no"
+ # Don't rebuild build-tools targets during normal build.
+ CD2MAKE+=	BUILD_TOOLS_META=.NOMETA
+ .endif
+@@ -3658,7 +3658,7 @@ _xi-mtree: .PHONY
+ 	${DESTDIR_MTREE} -f ${.CURDIR}/etc/mtree/BSD.lib${libcompat}.dist \
+ 	    -p ${XDDESTDIR}/usr >/dev/null
+ .endfor
+-.if ${MK_TESTS} != "no"
++.if "${MK_TESTS}" != "no"
+ 	mkdir -p ${XDDESTDIR}${TESTSBASE}
+ 	${DESTDIR_MTREE} -f ${.CURDIR}/etc/mtree/BSD.tests.dist \
+ 	    -p ${XDDESTDIR}${TESTSBASE} >/dev/null
+diff --git a/contrib/bmake/meta.h b/contrib/bmake/meta.h
+index 5d247422e..56efcfc24 100644
+--- a/contrib/bmake/meta.h
++++ b/contrib/bmake/meta.h
+@@ -58,3 +58,4 @@ void meta_compat_child(void);
+ void meta_compat_parent(pid_t);
+ 
+ extern bool useMeta;
++extern size_t strlcpy(char *dst, const char *src, size_t siz);
+diff --git a/contrib/bmake/mk/meta.sys.mk b/contrib/bmake/mk/meta.sys.mk
+index ba213dd49..687bd10f8 100644
+--- a/contrib/bmake/mk/meta.sys.mk
++++ b/contrib/bmake/mk/meta.sys.mk
+@@ -40,7 +40,11 @@ MKDEP_MK ?= auto.dep.mk
+ 
+ .MAKE.MODE ?= ${META_MODE}
+ 
++OS := $(shell uname)
++.ifeq $(OS) Linux
++.else
+ _filemon := ${.MAKE.PATH_FILEMON:U/dev/filemon}
++.endif
+ 
+ .if empty(UPDATE_DEPENDFILE)
+ _make_mode := ${.MAKE.MODE} ${META_MODE}
+diff --git a/contrib/bmake/unit-tests/varname-dot-make-path_filemon.mk b/contrib/bmake/unit-tests/varname-dot-make-path_filemon.mk
+index 8c07529f1..3fa459267 100644
+--- a/contrib/bmake/unit-tests/varname-dot-make-path_filemon.mk
++++ b/contrib/bmake/unit-tests/varname-dot-make-path_filemon.mk
+@@ -5,4 +5,5 @@
+ # TODO: Implementation
+ 
+ all:
+-	@:;
++	#@:;
++	/bin/true
+diff --git a/share/mk/Makefile b/share/mk/Makefile
+index 1663b787c..143f0fe04 100644
+--- a/share/mk/Makefile
++++ b/share/mk/Makefile
+@@ -74,7 +74,7 @@ FILES=	\
+ 
+ FILESDIR=	${BINDIR}/mk
+ 
+-.if ${MK_TESTS} != "no"
++.if "${MK_TESTS}" != "no"
+ FILES+=	atf.test.mk
+ FILES+=	googletest.test.inc.mk
+ FILES+=	googletest.test.mk
+diff --git a/share/mk/auto.obj.mk b/share/mk/auto.obj.mk
+index 21aa8e4a4..996758e3c 100644
+--- a/share/mk/auto.obj.mk
++++ b/share/mk/auto.obj.mk
+@@ -34,14 +34,14 @@ Mkdirs= Mkdirs() { \
+ # if MKOBJDIRS is set to auto (and NOOBJ isn't defined) do some magic...
+ # This will automatically create objdirs as needed.
+ # Skip it if we are just doing 'clean'.
+-.if ${MK_AUTO_OBJ:Uno} == "yes"
++.if "${MK_AUTO_OBJ:Uno}" == "yes"
+ MKOBJDIRS= auto
+ .endif
+ .if !defined(NOOBJ) && !defined(NO_OBJ) && ${MKOBJDIRS:Uno} == auto
+ # Use __objdir here so it is easier to tweak without impacting
+ # the logic.
+ .if !empty(MAKEOBJDIRPREFIX)
+-.if ${.CURDIR:M${MAKEOBJDIRPREFIX}/*} != ""
++.if "${.CURDIR:M${MAKEOBJDIRPREFIX}/*}" != ""
+ # we are already in obj tree!
+ __objdir?= ${.CURDIR}
+ .endif
+@@ -52,7 +52,7 @@ __objdir:= ${__objdir}
+ .if ${.OBJDIR:tA} != ${__objdir:tA}
+ # We need to chdir, make the directory if needed
+ .if !exists(${__objdir}/) && \
+-	(${.TARGETS} == "" || ${.TARGETS:Nclean*:N*clean:Ndestroy*} != "")
++	("${.TARGETS}" == "" || "${.TARGETS:Nclean*:N*clean:Ndestroy*}" != "")
+ # This will actually make it... 
+ __objdir_made != echo ${__objdir}/; umask ${OBJDIR_UMASK:U002}; \
+         ${ECHO_TRACE} "[Creating objdir ${__objdir}...]" >&2; \
+@@ -62,9 +62,9 @@ __objdir_made != echo ${__objdir}/; umask ${OBJDIR_UMASK:U002}; \
+ .OBJDIR: ${__objdir}
+ .if ${.OBJDIR:tA} != ${__objdir:tA}
+ # we did not get what we want - do we care?
+-.if ${__objdir_made:Uno:M${__objdir}/*} != ""
++.if "${__objdir_made:Uno:M${__objdir}/*}" != ""
+ # watch out for __objdir being relative path
+-.if !(${__objdir:M/*} == "" && ${.OBJDIR:tA} == ${${.CURDIR}/${__objdir}:L:tA})
++.if !("${__objdir:M/*}" == "" && ${.OBJDIR:tA} == ${${.CURDIR}/${__objdir}:L:tA})
+ .error could not use ${__objdir}: .OBJDIR=${.OBJDIR}
+ .endif
+ .endif
+diff --git a/share/mk/bsd.compiler.mk b/share/mk/bsd.compiler.mk
+index fd236b2e6..646334ff9 100644
+--- a/share/mk/bsd.compiler.mk
++++ b/share/mk/bsd.compiler.mk
+@@ -57,9 +57,9 @@ COMPILER_FEATURES=none
+ CCACHE_BUILD_TYPE?=	command
+ # Handle ccache after CC is determined, but not if CC/CXX are already
+ # overridden with a manual setup.
+-.if ${MK_CCACHE_BUILD:Uno} == "yes" && \
++.if "${MK_CCACHE_BUILD:Uno}" == "yes" && \
+     !make(test-system-*) && !make(print-dir) && !make(showconfig) && \
+-    (${CC:M*ccache/world/*} == "" || ${CXX:M*ccache/world/*} == "")
++    ("${CC:M*ccache/world/*}" == "" || "${CXX:M*ccache/world/*}" == "")
+ # CC is always prepended with the ccache wrapper rather than modifying
+ # PATH since it is more clear that ccache is used and avoids wasting time
+ # for mkdep/linking/asm builds.
+@@ -84,7 +84,7 @@ ${var}:=	${${var}}
+ # rather than checking mtime.  For external compilers it should be safe
+ # to use the more optimal mtime check.
+ # XXX: CCACHE_COMPILERCHECK= string:<compiler_version, compiler_build_rev, compiler_patch_rev, compiler_default_target, compiler_default_sysroot>
+-.if ${CC:N${CCACHE_BIN}:[1]:M/*} == ""
++.if "${CC:N${CCACHE_BIN}:[1]:M/*}" == ""
+ CCACHE_COMPILERCHECK?=	content
+ .else
+ CCACHE_COMPILERCHECK?=	mtime
+@@ -95,12 +95,12 @@ CCACHE_COMPILERCHECK?=	mtime
+ CCACHE_PATH=
+ .export CCACHE_PATH
+ .endif
+-.if ${CCACHE_BUILD_TYPE} == "command"
++.if "${CCACHE_BUILD_TYPE}" == "command"
+ # Remove ccache from the PATH to prevent double calls and wasted CPP/LD time.
+ PATH:=	${PATH:C,:?${CCACHE_WRAPPER_PATH}(/world)?(:$)?,,g}
+ # Override various toolchain vars.
+ .for var in CC CXX HOST_CC HOST_CXX
+-.if defined(${var}) && ${${var}:M${CCACHE_BIN}} == ""
++.if defined(${var}) && "${${var}:M${CCACHE_BIN}}" == ""
+ ${var}:=	${CCACHE_BIN} ${${var}}
+ .endif
+ .endfor
+@@ -114,7 +114,7 @@ CCACHE_WRAPPER_PATH_PFX=	${CCACHE_WRAPPER_PATH}:
+ # The port enables it due to ccache passing preprocessed C to clang
+ # which fails with -Wparentheses-equality, -Wtautological-compare, and
+ # -Wself-assign on macro-expanded lines.
+-.if defined(COMPILER_TYPE) && ${COMPILER_TYPE} == "gcc"
++.if defined(COMPILER_TYPE) && "${COMPILER_TYPE}" == "gcc"
+ CCACHE_NOCPP2=	1
+ .export CCACHE_NOCPP2
+ .endif
+@@ -146,7 +146,7 @@ _cc_vars+=XCC X_
+ .endif
+ 
+ .for cc X_ in ${_cc_vars}
+-.if ${cc} == "CC" || !empty(XCC)
++.if "${cc}" == "CC" || !empty(XCC)
+ # Try to import COMPILER_TYPE and COMPILER_VERSION from parent make.
+ # The value is only used/exported for the same environment that impacts
+ # CC and COMPILER_* settings here.
+@@ -164,7 +164,7 @@ _can_export=	yes
+ _can_export=	no
+ .endif
+ .endfor
+-.if ${_can_export} == yes
++.if "${_can_export}" == yes
+ .for var in ${_exported_vars}
+ .if defined(${var}__${${X_}_cc_hash})
+ ${var}=	${${var}__${${X_}_cc_hash}}
+@@ -172,8 +172,8 @@ ${var}=	${${var}__${${X_}_cc_hash}}
+ .endfor
+ .endif
+ 
+-.if ${cc} == "CC" || (${cc} == "XCC" && ${XCC} != ${CC})
+-.if ${MACHINE} == "common"
++.if "${cc}" == "CC" || ("${cc}" == "XCC" && "${XCC}" != "${CC}")
++.if "${MACHINE}" == "common"
+ # common is a pseudo machine for architecture independent
+ # generated files - thus there is no compiler.
+ ${X_}COMPILER_TYPE= none
+@@ -220,7 +220,7 @@ ${X_}COMPILER_FREEBSD_VERSION!=	{ echo "__FreeBSD_cc_version" | ${${cc}:N${CCACH
+ # If we get a literal "__FreeBSD_cc_version" back then the compiler
+ # is a non-FreeBSD build that doesn't support it or some other error
+ # occurred.
+-.if ${${X_}COMPILER_FREEBSD_VERSION} == "__FreeBSD_cc_version"
++.if "${${X_}COMPILER_FREEBSD_VERSION}" == "__FreeBSD_cc_version"
+ ${X_}COMPILER_FREEBSD_VERSION=	unknown
+ .endif
+ .endif
+@@ -230,19 +230,19 @@ ${X_}COMPILER_RESOURCE_DIR!=	${${cc}:N${CCACHE_BIN}} -print-resource-dir 2>/dev/
+ .endif
+ 
+ ${X_}COMPILER_FEATURES+=		c++11 c++14
+-.if ${${X_}COMPILER_TYPE} == "clang" || \
+-	(${${X_}COMPILER_TYPE} == "gcc" && ${${X_}COMPILER_VERSION} >= 70000)
++.if "${${X_}COMPILER_TYPE}" == "clang" || \
++	("${${X_}COMPILER_TYPE}" == "gcc" && ${${X_}COMPILER_VERSION} >= 70000)
+ ${X_}COMPILER_FEATURES+=	c++17
+ .endif
+-.if (${${X_}COMPILER_TYPE} == "clang" && ${${X_}COMPILER_VERSION} >= 100000) || \
+-	(${${X_}COMPILER_TYPE} == "gcc" && ${${X_}COMPILER_VERSION} >= 100100)
++.if ("${${X_}COMPILER_TYPE}" == "clang" && ${${X_}COMPILER_VERSION} >= 100000) || \
++	("${${X_}COMPILER_TYPE}" == "gcc" && ${${X_}COMPILER_VERSION} >= 100100)
+ ${X_}COMPILER_FEATURES+=	c++20
+ .endif
+-.if ${${X_}COMPILER_TYPE} == "clang" || \
+-	(${${X_}COMPILER_TYPE} == "gcc" && ${${X_}COMPILER_VERSION} >= 120000)
++.if "${${X_}COMPILER_TYPE}" == "clang" || \
++	("${${X_}COMPILER_TYPE}" == "gcc" && ${${X_}COMPILER_VERSION} >= 120000)
+ ${X_}COMPILER_FEATURES+=	init-all
+ .endif
+-.if ${${X_}COMPILER_TYPE} == "clang"
++.if "${${X_}COMPILER_TYPE}" == "clang"
+ ${X_}COMPILER_FEATURES+=	retpoline
+ # PR257638 lld fails with BE compressed debug.  Fixed in main but external tool
+ # chains will initially not have the fix.  For now limit the feature to LE
+@@ -253,18 +253,18 @@ ${X_}COMPILER_FEATURES+=	retpoline
+ # be undefined; be conservative and default to off until we turn this on by
+ # default everywhere.
+ .include <bsd.endian.mk>
+-.if (${.MAKE.OS} == "FreeBSD" || defined(TARGET_ENDIANNESS)) && \
+-    ${TARGET_ENDIANNESS} == "1234"
++.if ("${.MAKE.OS}" == "FreeBSD" || defined(TARGET_ENDIANNESS)) && \
++    "${TARGET_ENDIANNESS}" == "1234"
+ ${X_}COMPILER_FEATURES+=	compressed-debug
+ .endif
+ .endif
+-.if ${${X_}COMPILER_TYPE} == "clang" && ${${X_}COMPILER_VERSION} >= 100000 || \
+-	(${${X_}COMPILER_TYPE} == "gcc" && ${${X_}COMPILER_VERSION} >= 80100)
++.if "${${X_}COMPILER_TYPE}" == "clang" && ${${X_}COMPILER_VERSION} >= 100000 || \
++	("${${X_}COMPILER_TYPE}" == "gcc" && ${${X_}COMPILER_VERSION} >= 80100)
+ ${X_}COMPILER_FEATURES+=	fileprefixmap
+ .endif
+ 
+-.if (${${X_}COMPILER_TYPE} == "clang" && ${${X_}COMPILER_VERSION} >= 130000) || \
+-	(${${X_}COMPILER_TYPE} == "gcc" && ${${X_}COMPILER_VERSION} >= 90000)
++.if ("${${X_}COMPILER_TYPE}" == "clang" && ${${X_}COMPILER_VERSION} >= 130000) || \
++	("${${X_}COMPILER_TYPE}" == "gcc" && ${${X_}COMPILER_VERSION} >= 90000)
+ # AArch64 sha512 intrinsics are supported (and have been tested) in
+ # clang 13 and gcc 9.
+ ${X_}COMPILER_FEATURES+=	aarch64-sha512
+diff --git a/share/mk/bsd.confs.mk b/share/mk/bsd.confs.mk
+index c4fb62782..e3cf9e8e0 100644
+--- a/share/mk/bsd.confs.mk
++++ b/share/mk/bsd.confs.mk
+@@ -94,8 +94,8 @@ ${group}PREFIX_${cnf}=	${DESTDIR}${${_${group}DIR_${cnf}}}
+ .        for d in ${DIRS}
+ _DIRS+=	${${d}}
+ .        endfor
+-.        if ${DIRS:M${_${group}DIR_${cnf}}} == ""
+-.          if ${_DIRS:M${${_${group}DIR_${cnf}}}} == ""
++.        if "${DIRS:M${_${group}DIR_${cnf}}}" == ""
++.          if "${_DIRS:M${${_${group}DIR_${cnf}}}}" == ""
+ DIRS+=	${_${group}DIR_${cnf}}
+ .          else
+ _${group}DIR_${cnf}=	${group}DIR
+@@ -109,7 +109,7 @@ ${group}NAME_${cnf}?=	${cnf:T}
+ .        endif # defined(${group}NAME)
+ 
+ # Work around a bug with install(1) -C and /dev/null
+-.        if ${cnf} == "/dev/null"
++.        if "${cnf}" == "/dev/null"
+ INSTALL_COPY=
+ .        else
+ INSTALL_COPY=  -C
+@@ -131,7 +131,7 @@ _${group}INS_${cnf:T}: ${cnf}
+ .    endif # defined(${group}) && !empty(${group})
+ .  endfor
+ 
+-.if ${MK_STAGING} != "no"
++.if "${MK_STAGING}" != "no"
+ .  if !empty(STAGE_SETS)
+ buildconfig: stage_files
+ stage_files:
+diff --git a/share/mk/bsd.cpu.mk b/share/mk/bsd.cpu.mk
+index 3fee105e9..015600f93 100644
+--- a/share/mk/bsd.cpu.mk
++++ b/share/mk/bsd.cpu.mk
+@@ -5,21 +5,21 @@
+ 
+ .if !defined(CPUTYPE) || empty(CPUTYPE)
+ _CPUCFLAGS =
+-. if ${MACHINE_CPUARCH} == "aarch64"
++. if "${MACHINE_CPUARCH}" == "aarch64"
+ MACHINE_CPU = arm64
+-. elif ${MACHINE_CPUARCH} == "amd64"
++. elif "${MACHINE_CPUARCH}" == "amd64"
+ MACHINE_CPU = amd64 sse2 sse mmx
+-. elif ${MACHINE_CPUARCH} == "arm"
++. elif "${MACHINE_CPUARCH}" == "arm"
+ MACHINE_CPU = arm
+-. elif ${MACHINE_CPUARCH} == "i386"
++. elif "${MACHINE_CPUARCH}" == "i386"
+ MACHINE_CPU = i486
+-. elif ${MACHINE_ARCH} == "powerpc"
++. elif "${MACHINE_ARCH}" == "powerpc"
+ MACHINE_CPU = aim
+-. elif ${MACHINE_ARCH} == "powerpc64"
++. elif "${MACHINE_ARCH}" == "powerpc64"
+ MACHINE_CPU = aim altivec
+-. elif ${MACHINE_ARCH} == "powerpc64le"
++. elif "${MACHINE_ARCH}" == "powerpc64le"
+ MACHINE_CPU = aim altivec vsx vsx2
+-. elif ${MACHINE_CPUARCH} == "riscv"
++. elif "${MACHINE_CPUARCH}" == "riscv"
+ MACHINE_CPU = riscv
+ . endif
+ .else
+@@ -27,50 +27,50 @@ MACHINE_CPU = riscv
+ # Handle aliases (not documented in make.conf to avoid user confusion
+ # between e.g. i586 and pentium)
+ 
+-. if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "i386"
+-.  if ${CPUTYPE} == "barcelona"
++. if "${MACHINE_CPUARCH}" == "amd64" || "${MACHINE_CPUARCH}" == "i386"
++.  if "${CPUTYPE}" == "barcelona"
+ CPUTYPE = amdfam10
+-.  elif ${CPUTYPE} == "skx"
++.  elif "${CPUTYPE}" == "skx"
+ CPUTYPE = skylake-avx512
+-.  elif ${CPUTYPE} == "core-avx2"
++.  elif "${CPUTYPE}" == "core-avx2"
+ CPUTYPE = haswell
+-.  elif ${CPUTYPE} == "core-avx-i"
++.  elif "${CPUTYPE}" == "core-avx-i"
+ CPUTYPE = ivybridge
+-.  elif ${CPUTYPE} == "corei7-avx"
++.  elif "${CPUTYPE}" == "corei7-avx"
+ CPUTYPE = sandybridge
+-.  elif ${CPUTYPE} == "corei7"
++.  elif "${CPUTYPE}" == "corei7"
+ CPUTYPE = nehalem
+-.  elif ${CPUTYPE} == "slm"
++.  elif "${CPUTYPE}" == "slm"
+ CPUTYPE = silvermont
+-.  elif ${CPUTYPE} == "atom"
++.  elif "${CPUTYPE}" == "atom"
+ CPUTYPE = bonnell
+-.  elif ${CPUTYPE} == "core"
++.  elif "${CPUTYPE}" == "core"
+ CPUTYPE = prescott
+ .  endif
+-.  if ${MACHINE_CPUARCH} == "amd64"
+-.   if ${CPUTYPE} == "prescott"
++.  if "${MACHINE_CPUARCH}" == "amd64"
++.   if "${CPUTYPE}" == "prescott"
+ CPUTYPE = nocona
+ .   endif
+ .  else
+-.   if ${CPUTYPE} == "k7"
++.   if "${CPUTYPE}" == "k7"
+ CPUTYPE = athlon
+-.   elif ${CPUTYPE} == "p4"
++.   elif "${CPUTYPE}" == "p4"
+ CPUTYPE = pentium4
+-.   elif ${CPUTYPE} == "p4m"
++.   elif "${CPUTYPE}" == "p4m"
+ CPUTYPE = pentium4m
+-.   elif ${CPUTYPE} == "p3"
++.   elif "${CPUTYPE}" == "p3"
+ CPUTYPE = pentium3
+-.   elif ${CPUTYPE} == "p3m"
++.   elif "${CPUTYPE}" == "p3m"
+ CPUTYPE = pentium3m
+-.   elif ${CPUTYPE} == "p-m"
++.   elif "${CPUTYPE}" == "p-m"
+ CPUTYPE = pentium-m
+-.   elif ${CPUTYPE} == "p2"
++.   elif "${CPUTYPE}" == "p2"
+ CPUTYPE = pentium2
+-.   elif ${CPUTYPE} == "i686"
++.   elif "${CPUTYPE}" == "i686"
+ CPUTYPE = pentiumpro
+-.   elif ${CPUTYPE} == "i586/mmx"
++.   elif "${CPUTYPE}" == "i586/mmx"
+ CPUTYPE = pentium-mmx
+-.   elif ${CPUTYPE} == "i586"
++.   elif "${CPUTYPE}" == "i586"
+ CPUTYPE = pentium
+ .   endif
+ .  endif
+@@ -85,28 +85,28 @@ CPUTYPE = pentium
+ #	http://gcc.gnu.org/onlinedocs/gcc/SPARC-Options.html
+ #	http://gcc.gnu.org/onlinedocs/gcc/i386-and-x86_002d64-Options.html
+ 
+-. if ${MACHINE_CPUARCH} == "i386"
+-.  if ${CPUTYPE} == "crusoe"
++. if "${MACHINE_CPUARCH}" == "i386"
++.  if "${CPUTYPE}" == "crusoe"
+ _CPUCFLAGS = -march=i686 -falign-functions=0 -falign-jumps=0 -falign-loops=0
+-.  elif ${CPUTYPE} == "k5"
++.  elif "${CPUTYPE}" == "k5"
+ _CPUCFLAGS = -march=pentium
+-.  elif ${CPUTYPE} == "c7"
++.  elif "${CPUTYPE}" == "c7"
+ _CPUCFLAGS = -march=c3-2
+ .  else
+ _CPUCFLAGS = -march=${CPUTYPE}
+ .  endif
+-. elif ${MACHINE_CPUARCH} == "amd64"
++. elif "${MACHINE_CPUARCH}" == "amd64"
+ _CPUCFLAGS = -march=${CPUTYPE}
+-. elif ${MACHINE_CPUARCH} == "arm"
+-.  if ${CPUTYPE} == "xscale"
++. elif "${MACHINE_CPUARCH}" == "arm"
++.  if "${CPUTYPE}" == "xscale"
+ #XXX: gcc doesn't seem to like -mcpu=xscale, and dies while rebuilding itself
+ #_CPUCFLAGS = -mcpu=xscale
+ _CPUCFLAGS = -march=armv5te -D__XSCALE__
+-.  elif ${CPUTYPE:M*soft*} != ""
++.  elif "${CPUTYPE:M*soft*}" != ""
+ _CPUCFLAGS = -mfloat-abi=softfp
+-.  elif ${CPUTYPE} == "cortexa"
++.  elif "${CPUTYPE}" == "cortexa"
+ _CPUCFLAGS = -march=armv7 -mfpu=vfp
+-.  elif ${CPUTYPE:Marmv[67]*} != ""
++.  elif "${CPUTYPE:Marmv[67]*}" != ""
+ # Handle all the armvX types that FreeBSD runs:
+ #	armv6, armv6t2, armv7, armv7-a, armv7ve
+ # they require -march=. All the others require -mcpu=.
+@@ -124,16 +124,16 @@ _CPUCFLAGS = -march=${CPUTYPE}
+ #       exynos-m1
+ _CPUCFLAGS = -mcpu=${CPUTYPE}
+ . endif
+-. elif ${MACHINE_ARCH} == "powerpc"
+-.  if ${CPUTYPE} == "e500"
++. elif "${MACHINE_ARCH}" == "powerpc"
++.  if "${CPUTYPE}" == "e500"
+ _CPUCFLAGS = -Wa,-me500 -msoft-float
+ .  else
+ _CPUCFLAGS = -mcpu=${CPUTYPE}
+ .  endif
+-. elif ${MACHINE_ARCH:Mpowerpc64*} != ""
++. elif "${MACHINE_ARCH:Mpowerpc64*}" != ""
+ _CPUCFLAGS = -mcpu=${CPUTYPE}
+-. elif ${MACHINE_CPUARCH} == "aarch64"
+-.  if ${CPUTYPE:Marmv*} != ""
++. elif "${MACHINE_CPUARCH}" == "aarch64"
++.  if "${CPUTYPE:Marmv*}" != ""
+ # Use -march when the CPU type is an architecture value, e.g. armv8.1-a
+ _CPUCFLAGS = -march=${CPUTYPE}
+ .  else
+@@ -147,149 +147,149 @@ _CPUCFLAGS = -mcpu=${CPUTYPE}
+ # presence of a CPU feature.
+ 
+ ########## i386
+-. if ${MACHINE_CPUARCH} == "i386"
+-.  if ${CPUTYPE} == "znver4"
++. if "${MACHINE_CPUARCH}" == "i386"
++.  if "${CPUTYPE}" == "znver4"
+ MACHINE_CPU = avx512 avx2 avx sse42 sse41 ssse3 sse4a sse3 sse2 sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "znver3" || ${CPUTYPE} == "znver2" || \
+-    ${CPUTYPE} == "znver1"
++.  elif "${CPUTYPE}" == "znver3" || "${CPUTYPE}" == "znver2" || \
++    "${CPUTYPE}" == "znver1"
+ MACHINE_CPU = avx2 avx sse42 sse41 ssse3 sse4a sse3 sse2 sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "bdver4"
++.  elif "${CPUTYPE}" == "bdver4"
+ MACHINE_CPU = xop avx2 avx sse42 sse41 ssse3 sse4a sse3 sse2 sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "bdver3" || ${CPUTYPE} == "bdver2" || \
+-    ${CPUTYPE} == "bdver1"
++.  elif "${CPUTYPE}" == "bdver3" || "${CPUTYPE}" == "bdver2" || \
++    "${CPUTYPE}" == "bdver1"
+ MACHINE_CPU = xop avx sse42 sse41 ssse3 sse4a sse3 sse2 sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "btver2"
++.  elif "${CPUTYPE}" == "btver2"
+ MACHINE_CPU = avx sse42 sse41 ssse3 sse4a sse3 sse2 sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "btver1"
++.  elif "${CPUTYPE}" == "btver1"
+ MACHINE_CPU = ssse3 sse4a sse3 sse2 sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "amdfam10"
++.  elif "${CPUTYPE}" == "amdfam10"
+ MACHINE_CPU = athlon-xp athlon k7 3dnow sse4a sse3 sse2 sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "opteron-sse3" || ${CPUTYPE} == "athlon64-sse3"
++.  elif "${CPUTYPE}" == "opteron-sse3" || "${CPUTYPE}" == "athlon64-sse3"
+ MACHINE_CPU = athlon-xp athlon k7 3dnow sse3 sse2 sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "opteron" || ${CPUTYPE} == "athlon64" || \
+-    ${CPUTYPE} == "athlon-fx"
++.  elif "${CPUTYPE}" == "opteron" || "${CPUTYPE}" == "athlon64" || \
++    "${CPUTYPE}" == "athlon-fx"
+ MACHINE_CPU = athlon-xp athlon k7 3dnow sse2 sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "athlon-mp" || ${CPUTYPE} == "athlon-xp" || \
+-    ${CPUTYPE} == "athlon-4"
++.  elif "${CPUTYPE}" == "athlon-mp" || "${CPUTYPE}" == "athlon-xp" || \
++    "${CPUTYPE}" == "athlon-4"
+ MACHINE_CPU = athlon-xp athlon k7 3dnow sse mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "athlon" || ${CPUTYPE} == "athlon-tbird"
++.  elif "${CPUTYPE}" == "athlon" || "${CPUTYPE}" == "athlon-tbird"
+ MACHINE_CPU = athlon k7 3dnow mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "k6-3" || ${CPUTYPE} == "k6-2" || ${CPUTYPE} == "geode"
++.  elif "${CPUTYPE}" == "k6-3" || "${CPUTYPE}" == "k6-2" || "${CPUTYPE}" == "geode"
+ MACHINE_CPU = 3dnow mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "k6"
++.  elif "${CPUTYPE}" == "k6"
+ MACHINE_CPU = mmx k6 k5 i586
+-.  elif ${CPUTYPE} == "k5"
++.  elif "${CPUTYPE}" == "k5"
+ MACHINE_CPU = k5 i586
+-.  elif ${CPUTYPE} == "sapphirerapids" || ${CPUTYPE} == "tigerlake" || \
+-    ${CPUTYPE} == "cooperlake" || ${CPUTYPE} == "cascadelake" || \
+-    ${CPUTYPE} == "icelake-server" || ${CPUTYPE} == "icelake-client" || \
+-    ${CPUTYPE} == "cannonlake" || ${CPUTYPE} == "knm" || \
+-    ${CPUTYPE} == "skylake-avx512" || ${CPUTYPE} == "knl" || \
+-    ${CPUTYPE} == "x86-64-v4"
++.  elif "${CPUTYPE}" == "sapphirerapids" || "${CPUTYPE}" == "tigerlake" || \
++    "${CPUTYPE}" == "cooperlake" || "${CPUTYPE}" == "cascadelake" || \
++    "${CPUTYPE}" == "icelake-server" || "${CPUTYPE}" == "icelake-client" || \
++    "${CPUTYPE}" == "cannonlake" || "${CPUTYPE}" == "knm" || \
++    "${CPUTYPE}" == "skylake-avx512" || "${CPUTYPE}" == "knl" || \
++    "${CPUTYPE}" == "x86-64-v4"
+ MACHINE_CPU = avx512 avx2 avx sse42 sse41 ssse3 sse3 sse2 sse i686 mmx i586
+-.  elif ${CPUTYPE} == "alderlake" || ${CPUTYPE} == "skylake" || \
+-    ${CPUTYPE} == "broadwell" || ${CPUTYPE} == "haswell" || \
+-    ${CPUTYPE} == "x86-64-v3"
++.  elif "${CPUTYPE}" == "alderlake" || "${CPUTYPE}" == "skylake" || \
++    "${CPUTYPE}" == "broadwell" || "${CPUTYPE}" == "haswell" || \
++    "${CPUTYPE}" == "x86-64-v3"
+ MACHINE_CPU = avx2 avx sse42 sse41 ssse3 sse3 sse2 sse i686 mmx i586
+-.  elif ${CPUTYPE} == "ivybridge" || ${CPUTYPE} == "sandybridge"
++.  elif "${CPUTYPE}" == "ivybridge" || "${CPUTYPE}" == "sandybridge"
+ MACHINE_CPU = avx sse42 sse41 ssse3 sse3 sse2 sse i686 mmx i586
+-.  elif ${CPUTYPE} == "tremont" || ${CPUTYPE} == "goldmont-plus" || \
+-    ${CPUTYPE} == "goldmont" || ${CPUTYPE} == "westmere" || \
+-    ${CPUTYPE} == "nehalem" || ${CPUTYPE} == "silvermont" || \
+-    ${CPUTYPE} == "x86-64-v2"
++.  elif "${CPUTYPE}" == "tremont" || "${CPUTYPE}" == "goldmont-plus" || \
++    "${CPUTYPE}" == "goldmont" || "${CPUTYPE}" == "westmere" || \
++    "${CPUTYPE}" == "nehalem" || "${CPUTYPE}" == "silvermont" || \
++    "${CPUTYPE}" == "x86-64-v2"
+ MACHINE_CPU = sse42 sse41 ssse3 sse3 sse2 sse i686 mmx i586
+-.  elif ${CPUTYPE} == "penryn"
++.  elif "${CPUTYPE}" == "penryn"
+ MACHINE_CPU = sse41 ssse3 sse3 sse2 sse i686 mmx i586
+-.  elif ${CPUTYPE} == "core2" || ${CPUTYPE} == "bonnell"
++.  elif "${CPUTYPE}" == "core2" || "${CPUTYPE}" == "bonnell"
+ MACHINE_CPU = ssse3 sse3 sse2 sse i686 mmx i586
+-.  elif ${CPUTYPE} == "yonah" || ${CPUTYPE} == "prescott"
++.  elif "${CPUTYPE}" == "yonah" || "${CPUTYPE}" == "prescott"
+ MACHINE_CPU = sse3 sse2 sse i686 mmx i586
+-.  elif ${CPUTYPE} == "pentium4" || ${CPUTYPE} == "pentium4m" || \
+-    ${CPUTYPE} == "pentium-m" || ${CPUTYPE} == "x86-64"
++.  elif "${CPUTYPE}" == "pentium4" || "${CPUTYPE}" == "pentium4m" || \
++    "${CPUTYPE}" == "pentium-m" || "${CPUTYPE}" == "x86-64"
+ MACHINE_CPU = sse2 sse i686 mmx i586
+-.  elif ${CPUTYPE} == "pentium3" || ${CPUTYPE} == "pentium3m"
++.  elif "${CPUTYPE}" == "pentium3" || "${CPUTYPE}" == "pentium3m"
+ MACHINE_CPU = sse i686 mmx i586
+-.  elif ${CPUTYPE} == "pentium2"
++.  elif "${CPUTYPE}" == "pentium2"
+ MACHINE_CPU = i686 mmx i586
+-.  elif ${CPUTYPE} == "pentiumpro"
++.  elif "${CPUTYPE}" == "pentiumpro"
+ MACHINE_CPU = i686 i586
+-.  elif ${CPUTYPE} == "pentium-mmx"
++.  elif "${CPUTYPE}" == "pentium-mmx"
+ MACHINE_CPU = mmx i586
+-.  elif ${CPUTYPE} == "pentium"
++.  elif "${CPUTYPE}" == "pentium"
+ MACHINE_CPU = i586
+-.  elif ${CPUTYPE} == "c7"
++.  elif "${CPUTYPE}" == "c7"
+ MACHINE_CPU = sse3 sse2 sse i686 mmx i586
+-.  elif ${CPUTYPE} == "c3-2"
++.  elif "${CPUTYPE}" == "c3-2"
+ MACHINE_CPU = sse i686 mmx i586
+-.  elif ${CPUTYPE} == "c3"
++.  elif "${CPUTYPE}" == "c3"
+ MACHINE_CPU = 3dnow mmx i586
+-.  elif ${CPUTYPE} == "winchip2"
++.  elif "${CPUTYPE}" == "winchip2"
+ MACHINE_CPU = 3dnow mmx
+-.  elif ${CPUTYPE} == "winchip-c6"
++.  elif "${CPUTYPE}" == "winchip-c6"
+ MACHINE_CPU = mmx
+ .  endif
+ MACHINE_CPU += i486
+ ########## amd64
+-. elif ${MACHINE_CPUARCH} == "amd64"
+-.  if ${CPUTYPE} == "znver4"
++. elif "${MACHINE_CPUARCH}" == "amd64"
++.  if "${CPUTYPE}" == "znver4"
+ MACHINE_CPU = avx512 avx2 avx sse42 sse41 ssse3 sse4a sse3
+-.  elif ${CPUTYPE} == "znver3" || ${CPUTYPE} == "znver2" || \
+-    ${CPUTYPE} == "znver1"
++.  elif "${CPUTYPE}" == "znver3" || "${CPUTYPE}" == "znver2" || \
++    "${CPUTYPE}" == "znver1"
+ MACHINE_CPU = avx2 avx sse42 sse41 ssse3 sse4a sse3
+-.  elif ${CPUTYPE} == "bdver4"
++.  elif "${CPUTYPE}" == "bdver4"
+ MACHINE_CPU = xop avx2 avx sse42 sse41 ssse3 sse4a sse3
+-.  elif ${CPUTYPE} == "bdver3" || ${CPUTYPE} == "bdver2" || \
+-    ${CPUTYPE} == "bdver1"
++.  elif "${CPUTYPE}" == "bdver3" || "${CPUTYPE}" == "bdver2" || \
++    "${CPUTYPE}" == "bdver1"
+ MACHINE_CPU = xop avx sse42 sse41 ssse3 sse4a sse3
+-.  elif ${CPUTYPE} == "btver2"
++.  elif "${CPUTYPE}" == "btver2"
+ MACHINE_CPU = avx sse42 sse41 ssse3 sse4a sse3
+-.  elif ${CPUTYPE} == "btver1"
++.  elif "${CPUTYPE}" == "btver1"
+ MACHINE_CPU = ssse3 sse4a sse3
+-.  elif ${CPUTYPE} == "amdfam10"
++.  elif "${CPUTYPE}" == "amdfam10"
+ MACHINE_CPU = k8 3dnow sse4a sse3
+-.  elif ${CPUTYPE} == "opteron-sse3" || ${CPUTYPE} == "athlon64-sse3" || \
+-    ${CPUTYPE} == "k8-sse3"
++.  elif "${CPUTYPE}" == "opteron-sse3" || "${CPUTYPE}" == "athlon64-sse3" || \
++    "${CPUTYPE}" == "k8-sse3"
+ MACHINE_CPU = k8 3dnow sse3
+-.  elif ${CPUTYPE} == "opteron" || ${CPUTYPE} == "athlon64" || \
+-    ${CPUTYPE} == "athlon-fx" || ${CPUTYPE} == "k8"
++.  elif "${CPUTYPE}" == "opteron" || "${CPUTYPE}" == "athlon64" || \
++    "${CPUTYPE}" == "athlon-fx" || "${CPUTYPE}" == "k8"
+ MACHINE_CPU = k8 3dnow
+-.  elif ${CPUTYPE} == "sapphirerapids" || ${CPUTYPE} == "tigerlake" || \
+-    ${CPUTYPE} == "cooperlake" || ${CPUTYPE} == "cascadelake" || \
+-    ${CPUTYPE} == "icelake-server" || ${CPUTYPE} == "icelake-client" || \
+-    ${CPUTYPE} == "cannonlake" || ${CPUTYPE} == "knm" || \
+-    ${CPUTYPE} == "skylake-avx512" || ${CPUTYPE} == "knl" || \
+-    ${CPUTYPE} == "x86-64-v4"
++.  elif "${CPUTYPE}" == "sapphirerapids" || "${CPUTYPE}" == "tigerlake" || \
++    "${CPUTYPE}" == "cooperlake" || "${CPUTYPE}" == "cascadelake" || \
++    "${CPUTYPE}" == "icelake-server" || "${CPUTYPE}" == "icelake-client" || \
++    "${CPUTYPE}" == "cannonlake" || "${CPUTYPE}" == "knm" || \
++    "${CPUTYPE}" == "skylake-avx512" || "${CPUTYPE}" == "knl" || \
++    "${CPUTYPE}" == "x86-64-v4"
+ MACHINE_CPU = avx512 avx2 avx sse42 sse41 ssse3 sse3
+-.  elif ${CPUTYPE} == "alderlake" || ${CPUTYPE} == "skylake" || \
+-    ${CPUTYPE} == "broadwell" || ${CPUTYPE} == "haswell" || \
+-    ${CPUTYPE} == "x86-64-v3"
++.  elif "${CPUTYPE}" == "alderlake" || "${CPUTYPE}" == "skylake" || \
++    "${CPUTYPE}" == "broadwell" || "${CPUTYPE}" == "haswell" || \
++    "${CPUTYPE}" == "x86-64-v3"
+ MACHINE_CPU = avx2 avx sse42 sse41 ssse3 sse3
+-.  elif ${CPUTYPE} == "ivybridge" || ${CPUTYPE} == "sandybridge"
++.  elif "${CPUTYPE}" == "ivybridge" || "${CPUTYPE}" == "sandybridge"
+ MACHINE_CPU = avx sse42 sse41 ssse3 sse3
+-.  elif ${CPUTYPE} == "tremont" || ${CPUTYPE} == "goldmont-plus" || \
+-    ${CPUTYPE} == "goldmont" || ${CPUTYPE} == "westmere" || \
+-    ${CPUTYPE} == "nehalem" || ${CPUTYPE} == "silvermont" || \
+-    ${CPUTYPE} == "x86-64-v2"
++.  elif "${CPUTYPE}" == "tremont" || "${CPUTYPE}" == "goldmont-plus" || \
++    "${CPUTYPE}" == "goldmont" || "${CPUTYPE}" == "westmere" || \
++    "${CPUTYPE}" == "nehalem" || "${CPUTYPE}" == "silvermont" || \
++    "${CPUTYPE}" == "x86-64-v2"
+ MACHINE_CPU = sse42 sse41 ssse3 sse3
+-.  elif ${CPUTYPE} == "penryn"
++.  elif "${CPUTYPE}" == "penryn"
+ MACHINE_CPU = sse41 ssse3 sse3
+-.  elif ${CPUTYPE} == "core2" || ${CPUTYPE} == "bonnell"
++.  elif "${CPUTYPE}" == "core2" || "${CPUTYPE}" == "bonnell"
+ MACHINE_CPU = ssse3 sse3
+-.  elif ${CPUTYPE} == "nocona"
++.  elif "${CPUTYPE}" == "nocona"
+ MACHINE_CPU = sse3
+ .  endif
+ MACHINE_CPU += amd64 sse2 sse mmx
+ ########## powerpc
+-. elif ${MACHINE_ARCH} == "powerpc"
+-.  if ${CPUTYPE} == "e500"
++. elif "${MACHINE_ARCH}" == "powerpc"
++.  if "${CPUTYPE}" == "e500"
+ MACHINE_CPU = booke softfp
+-.  elif ${CPUTYPE} == "g4"
++.  elif "${CPUTYPE}" == "g4"
+ MACHINE_CPU = aim altivec
+ .  else
+ MACHINE_CPU= aim
+ .  endif
+-. elif ${MACHINE_ARCH} == "powerpc64"
+-.  if ${CPUTYPE} == "e5500"
++. elif "${MACHINE_ARCH}" == "powerpc64"
++.  if "${CPUTYPE}" == "e5500"
+ MACHINE_CPU = booke
+ .  elif ${CPUTYPE} == power7
+ MACHINE_CPU = altivec vsx
+@@ -300,31 +300,31 @@ MACHINE_CPU = altivec vsx vsx2 vsx3
+ .  else
+ MACHINE_CPU = aim altivec
+ .  endif
+-. elif ${MACHINE_ARCH} == "powerpc64le"
++. elif "${MACHINE_ARCH}" == "powerpc64le"
+ MACHINE_CPU = aim altivec vsx vsx2
+ .  if ${CPUTYPE} == power9
+ MACHINE_CPU += vsx3
+ .  endif
+ ########## riscv
+-. elif ${MACHINE_CPUARCH} == "riscv"
++. elif "${MACHINE_CPUARCH}" == "riscv"
+ MACHINE_CPU = riscv
+ . endif
+ .endif
+ 
+ ########## arm
+-.if ${MACHINE_CPUARCH} == "arm"
++.if "${MACHINE_CPUARCH}" == "arm"
+ MACHINE_CPU += arm
+-. if ${MACHINE_ARCH:Marmv6*} != ""
++. if "${MACHINE_ARCH:Marmv6*}" != ""
+ MACHINE_CPU += armv6
+ . endif
+-. if ${MACHINE_ARCH:Marmv7*} != ""
++. if "${MACHINE_ARCH:Marmv7*}" != ""
+ MACHINE_CPU += armv7
+ . endif
+ # Normally armv6 and armv7 are hard float ABI from FreeBSD 11 onwards. However
+ # when CPUTYPE has 'soft' in it, we use the soft-float ABI to allow building of
+ # soft-float ABI libraries. In this case, we have to add the -mfloat-abi=softfp
+ # to force that.
+-. if defined(CPUTYPE) && ${CPUTYPE:M*soft*} != ""
++. if defined(CPUTYPE) && "${CPUTYPE:M*soft*}" != ""
+ # Needs to be CFLAGS not _CPUCFLAGS because it's needed for the ABI
+ # not a nice optimization. Please note: softfp ABI uses hardware floating
+ # instructions, but passes arguments to function calls in integer regsiters.
+@@ -335,16 +335,16 @@ CFLAGS += -mfloat-abi=softfp
+ . endif
+ .endif
+ 
+-.if ${MACHINE_ARCH} == "powerpc" || ${MACHINE_ARCH} == "powerpcspe"
++.if "${MACHINE_ARCH}" == "powerpc" || "${MACHINE_ARCH}" == "powerpcspe"
+ LDFLAGS.bfd+= -Wl,--secure-plt
+ .endif
+ 
+-.if ${MACHINE_ARCH} == "powerpcspe"
++.if "${MACHINE_ARCH}" == "powerpcspe"
+ CFLAGS += -mcpu=8548 -mspe
+ CFLAGS.gcc+= -mabi=spe -mfloat-gprs=double -Wa,-me500
+ .endif
+ 
+-.if ${MACHINE_CPUARCH} == "riscv"
++.if "${MACHINE_CPUARCH}" == "riscv"
+ CFLAGS += -march=rv64imafdc -mabi=lp64d
+ .endif
+ 
+@@ -369,7 +369,7 @@ CFLAGS += ${_CPUCFLAGS}
+ # -mno-sse42
+ # (-mfpmath= is not supported)
+ #
+-.if ${MACHINE_CPUARCH} == "i386" || ${MACHINE_CPUARCH} == "amd64"
++.if "${MACHINE_CPUARCH}" == "i386" || "${MACHINE_CPUARCH}" == "amd64"
+ CFLAGS_NO_SIMD.clang= -mno-avx -mno-avx2
+ CFLAGS_NO_SIMD= -mno-mmx -mno-sse
+ .endif
+@@ -391,7 +391,7 @@ CXXFLAGS += ${CXXFLAGS.${MACHINE_ARCH}}
+ # Size of time_t:		time32, time64
+ #
+ .if (${MACHINE} == "arm" && (defined(CPUTYPE) && ${CPUTYPE:M*soft*})) || \
+-    (${MACHINE_ARCH} == "powerpc" && (defined(CPUTYPE) && ${CPUTYPE} == "e500"))
++    ("${MACHINE_ARCH}" == "powerpc" && (defined(CPUTYPE) && "${CPUTYPE}" == "e500"))
+ MACHINE_ABI+=	soft-float
+ .else
+ MACHINE_ABI+=	hard-float
+@@ -407,7 +407,7 @@ MACHINE_ABI+=  ptr64
+ .else
+ MACHINE_ABI+=  ptr32
+ .endif
+-.if ${MACHINE_ARCH} == "i386"
++.if "${MACHINE_ARCH}" == "i386"
+ MACHINE_ABI+=  time32
+ .else
+ MACHINE_ABI+=  time64
+diff --git a/share/mk/bsd.endian.mk b/share/mk/bsd.endian.mk
+index ba662ffc7..83b5a9d1d 100644
+--- a/share/mk/bsd.endian.mk
++++ b/share/mk/bsd.endian.mk
+@@ -1,16 +1,16 @@
+ 
+-.if ${MACHINE_CPUARCH} == "aarch64" || \
+-    ${MACHINE_CPUARCH} == "arm" || \
+-    ${MACHINE_ARCH} == "amd64" || \
+-    ${MACHINE_ARCH} == "i386" || \
+-    ${MACHINE_ARCH} == "powerpc64le" || \
+-    ${MACHINE_CPUARCH} == "riscv"
++.if "${MACHINE_CPUARCH}" == "aarch64" || \
++    "${MACHINE_CPUARCH}" == "arm" || \
++    "${MACHINE_ARCH}" == "amd64" || \
++    "${MACHINE_ARCH}" == "i386" || \
++    "${MACHINE_ARCH}" == "powerpc64le" || \
++    "${MACHINE_CPUARCH}" == "riscv"
+ TARGET_ENDIANNESS= 1234
+ CAP_MKDB_ENDIAN= -l
+ LOCALEDEF_ENDIAN= -l
+-.elif ${MACHINE_ARCH} == "powerpc" || \
+-    ${MACHINE_ARCH} == "powerpc64" || \
+-    ${MACHINE_ARCH} == "powerpcspe"
++.elif "${MACHINE_ARCH}" == "powerpc" || \
++    "${MACHINE_ARCH}" == "powerpc64" || \
++    "${MACHINE_ARCH}" == "powerpcspe"
+ TARGET_ENDIANNESS= 4321
+ CAP_MKDB_ENDIAN= -b
+ LOCALEDEF_ENDIAN= -b
+diff --git a/share/mk/bsd.files.mk b/share/mk/bsd.files.mk
+index 517ecd44f..fcb01a6de 100644
+--- a/share/mk/bsd.files.mk
++++ b/share/mk/bsd.files.mk
+@@ -29,7 +29,7 @@ installfiles: installfiles-${group}
+ 
+ ${group}OWN?=	${SHAREOWN}
+ ${group}GRP?=	${SHAREGRP}
+-.if ${MK_INSTALL_AS_USER} == "yes"
++.if "${MK_INSTALL_AS_USER}" == "yes"
+ ${group}OWN=	${SHAREOWN}
+ ${group}GRP=	${SHAREGRP}
+ .endif
+@@ -37,7 +37,7 @@ ${group}MODE?=	${SHAREMODE}
+ ${group}DIR?=	BINDIR
+ STAGE_SETS+=	${group:C,[/*],_,g}
+ 
+-.if ${group} == "FILES"
++.if "${group}" == "FILES"
+ FILESPACKAGE?=	${PACKAGE:Uutilities}
+ .endif
+ 
+@@ -66,7 +66,7 @@ STAGE_DIR.${group:C,[/*],_,g}= ${STAGE_OBJTOP}${${_${group}DIR}}
+ .for file in ${${group}}
+ ${group}OWN_${file}?=	${${group}OWN}
+ ${group}GRP_${file}?=	${${group}GRP}
+-.if ${MK_INSTALL_AS_USER} == "yes"
++.if "${MK_INSTALL_AS_USER}" == "yes"
+ ${group}OWN_${file}=	${SHAREOWN}
+ ${group}GRP_${file}=	${SHAREGRP}
+ .endif # ${MK_INSTALL_AS_USER} == "yes"
+@@ -89,8 +89,8 @@ ${group}PREFIX_${file}=	${DESTDIR}${${_${group}DIR_${file}}}
+ .for d in ${DIRS}
+ _DIRS+=	${${d}}
+ .endfor
+-.if ${DIRS:M${_${group}DIR_${file}}} == ""
+-.if ${_DIRS:M${${_${group}DIR_${file}}}} == ""
++.if "${DIRS:M${_${group}DIR_${file}}}" == ""
++.if "${_DIRS:M${${_${group}DIR_${file}}}}" == ""
+ DIRS+=	${_${group}DIR_${file}}
+ .else
+ _${group}DIR_${file}=	${group}DIR
+@@ -126,8 +126,8 @@ _${group}INS_${file}: ${file} installdirs-${_${group}DIR_${file}}
+ realinstall: installfiles
+ .ORDER: beforeinstall installfiles
+ 
+-.if ${MK_STAGING} != "no"
+-.if ${FILESGROUPS:@g@${$g}@} != ""
++.if "${MK_STAGING}" != "no"
++.if "${FILESGROUPS:@g@${$g}@}" != ""
+ .if !empty(STAGE_SETS)
+ buildfiles: stage_files
+ STAGE_TARGETS+= stage_files
+diff --git a/share/mk/bsd.init.mk b/share/mk/bsd.init.mk
+index 64fdd23ce..4ba7ea7ca 100644
+--- a/share/mk/bsd.init.mk
++++ b/share/mk/bsd.init.mk
+@@ -27,7 +27,7 @@ OBJS_SRCS_FILTER+= R
+ 
+ # Handle INSTALL_AS_USER here to maximize the chance that
+ # it has final authority over fooOWN and fooGRP.
+-.if ${MK_INSTALL_AS_USER} != "no"
++.if "${MK_INSTALL_AS_USER}" != "no"
+ .if !defined(_uid)
+ _uid!=	id -u
+ .export _uid
+@@ -54,11 +54,11 @@ $xGRP=	${_gid}
+ # - make install is used without other targets.  This is to avoid breaking
+ #   things like 'make all install' or 'make foo install'.
+ # - non-build targets are called
+-.if ${MK_DIRDEPS_BUILD} == "yes" && ${.MAKE.LEVEL} == 0
++.if "${MK_DIRDEPS_BUILD}" == "yes" && ${.MAKE.LEVEL} == 0
+ # targets that are ok at level 0
+ DIRDEPS_BUILD_LEVEL0_TARGETS += clean* destroy*
+ M_ListToSkip?= O:u:S,^,N,:ts:
+-.if ${.TARGETS:Uall:${DIRDEPS_BUILD_LEVEL0_TARGETS:${M_ListToSkip}}} != ""
++.if "${.TARGETS:Uall:${DIRDEPS_BUILD_LEVEL0_TARGETS:${M_ListToSkip}}}" != ""
+ _SKIP_BUILD=	not building at level 0
+ .endif
+ .elif !empty(.MAKEFLAGS:M-V${_V_DO_BUILD}) || \
+@@ -71,7 +71,7 @@ _SKIP_BUILD=	not building at level 0
+ # Skip building, but don't show a warning.
+ _SKIP_BUILD=
+ .endif
+-.if ${MK_DIRDEPS_BUILD} == "yes" && ${.MAKE.LEVEL} > 0 && !empty(_SKIP_BUILD)
++.if "${MK_DIRDEPS_BUILD}" == "yes" && ${.MAKE.LEVEL} > 0 && !empty(_SKIP_BUILD)
+ .warning ${_SKIP_BUILD}
+ .endif
+ 
+@@ -80,9 +80,9 @@ beforebuild: .PHONY .NOTMAIN
+ all: beforebuild .WAIT
+ .endif
+ 
+-.if ${MK_META_MODE} == "yes"
++.if "${MK_META_MODE}" == "yes"
+ .if !exists(/dev/filemon) && \
+-    ${UPDATE_DEPENDFILE:Uyes:tl} != "no" && !defined(NO_FILEMON) && \
++    "${UPDATE_DEPENDFILE:Uyes:tl}" != "no" && !defined(NO_FILEMON) && \
+     !make(test-system-*) && !make(showconfig) && !make(print-dir) && \
+     ${.MAKEFLAGS:M-V} == ""
+ .warning The filemon module (/dev/filemon) is not loaded.
+diff --git a/share/mk/bsd.lib.mk b/share/mk/bsd.lib.mk
+index 3099c8e20..5faea9e54 100644
+--- a/share/mk/bsd.lib.mk
++++ b/share/mk/bsd.lib.mk
+@@ -47,7 +47,7 @@ SONAME?=	${SHLIB_NAME}
+ CFLAGS+=	${CRUNCH_CFLAGS}
+ .endif
+ 
+-.if ${MK_ASSERT_DEBUG} == "no"
++.if "${MK_ASSERT_DEBUG}" == "no"
+ CFLAGS+= -DNDEBUG
+ # XXX: shouldn't we ensure that !asserts marks potentially unused variables as
+ # __unused instead of disabling -Werror globally?
+@@ -57,7 +57,7 @@ MK_WERROR=	no
+ .if defined(DEBUG_FLAGS)
+ CFLAGS+= ${DEBUG_FLAGS}
+ 
+-.if ${MK_CTF} != "no" && ${DEBUG_FLAGS:M-g} != ""
++.if "${MK_CTF}" != "no" && "${DEBUG_FLAGS:M-g}" != ""
+ CTFFLAGS+= -g
+ .endif
+ .else
+@@ -78,17 +78,17 @@ TAG_ARGS=	-T ${TAGS:[*]:S/ /,/g}
+ .endif
+ 
+ # ELF hardening knobs
+-.if ${MK_BIND_NOW} != "no"
++.if "${MK_BIND_NOW}" != "no"
+ LDFLAGS+= -Wl,-znow
+ .endif
+-.if ${LINKER_TYPE} != "mac"
+-.if ${MK_RELRO} == "no"
++.if "${LINKER_TYPE}" != "mac"
++.if "${MK_RELRO}" == "no"
+ LDFLAGS+= -Wl,-znorelro
+ .else
+ LDFLAGS+= -Wl,-zrelro
+ .endif
+ .endif
+-.if ${MK_RETPOLINE} != "no"
++.if "${MK_RETPOLINE}" != "no"
+ .if ${COMPILER_FEATURES:Mretpoline} && ${LINKER_FEATURES:Mretpoline}
+ CFLAGS+= -mretpoline
+ CXXFLAGS+= -mretpoline
+@@ -101,18 +101,18 @@ LDFLAGS+= -Wl,-zretpolineplt
+ LDFLAGS.bfd+= -Wl,-znoexecstack
+ 
+ # Initialize stack variables on function entry
+-.if ${MK_INIT_ALL_ZERO} == "yes"
++.if "${MK_INIT_ALL_ZERO}" == "yes"
+ .if ${COMPILER_FEATURES:Minit-all}
+ CFLAGS+= -ftrivial-auto-var-init=zero
+ CXXFLAGS+= -ftrivial-auto-var-init=zero
+-.if ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} < 160000
++.if "${COMPILER_TYPE}" == "clang" && "${COMPILER_VERSION}" < 160000
+ CFLAGS+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+ CXXFLAGS+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+ .endif
+ .else
+ .warning InitAll (zeros) requested but not supported by compiler
+ .endif
+-.elif ${MK_INIT_ALL_PATTERN} == "yes"
++.elif "${MK_INIT_ALL_PATTERN}" == "yes"
+ .if ${COMPILER_FEATURES:Minit-all}
+ CFLAGS+= -ftrivial-auto-var-init=pattern
+ CXXFLAGS+= -ftrivial-auto-var-init=pattern
+@@ -124,7 +124,7 @@ CXXFLAGS+= -ftrivial-auto-var-init=pattern
+ # bsd.sanitizer.mk is not installed, so don't require it (e.g. for ports).
+ .sinclude "bsd.sanitizer.mk"
+ 
+-.if ${MK_DEBUG_FILES} != "no" && empty(DEBUG_FLAGS:M-g) && \
++.if "${MK_DEBUG_FILES}" != "no" && empty(DEBUG_FLAGS:M-g) && \
+     empty(DEBUG_FLAGS:M-gdwarf*)
+ .if !${COMPILER_FEATURES:Mcompressed-debug}
+ CFLAGS+= ${DEBUG_FILES_CFLAGS:N-gz*}
+@@ -136,7 +136,7 @@ CXXFLAGS+= ${DEBUG_FILES_CFLAGS}
+ CTFFLAGS+= -g
+ .endif
+ 
+-.if ${MACHINE_CPUARCH} == "riscv" && ${LINKER_FEATURES:Mriscv-relaxations} == ""
++.if "${MACHINE_CPUARCH}" == "riscv" && "${LINKER_FEATURES:Mriscv-relaxations}" == ""
+ CFLAGS += -mno-relax
+ .endif
+ 
+@@ -243,12 +243,12 @@ _LIBDIR:=${LIBDIR}
+ _SHLIBDIR:=${SHLIBDIR}
+ 
+ .if defined(SHLIB_NAME)
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ SHLIB_NAME_FULL=${SHLIB_NAME}.full
+ # Use ${DEBUGDIR} for base system debug files, else .debug subdirectory
+-.if ${_SHLIBDIR} == "/boot" ||\
+-    ${SHLIBDIR:C%/lib(/.*)?$%/lib%} == "/lib" ||\
+-    ${SHLIBDIR:C%/usr/(tests/)?lib(32|exec)?(/.*)?%/usr/lib%} == "/usr/lib"
++.if "${_SHLIBDIR}" == "/boot" ||\
++    "${SHLIBDIR:C%/lib(/.*)?$%/lib%}" == "/lib" ||\
++    "${SHLIBDIR:C%/usr/(tests/)?lib(32|exec)?(/.*)?%/usr/lib%}" == "/usr/lib"
+ DEBUGFILEDIR=${DEBUGDIR}${_SHLIBDIR}
+ .else
+ DEBUGFILEDIR=${_SHLIBDIR}/.debug
+@@ -272,7 +272,7 @@ LDFLAGS+=	-Wl,--version-script=${VERSION_MAP}
+ # lld >= 16 turned on --no-undefined-version by default, but we have several
+ # symbols in our version maps that may or may not exist, depending on
+ # compile-time defines.
+-.if ${LINKER_TYPE} == "lld" && ${LINKER_VERSION} >= 160000
++.if "${LINKER_TYPE}" == "lld" && ${LINKER_VERSION} >= 160000
+ LDFLAGS+=	-Wl,--undefined-version
+ .endif
+ .endif
+@@ -298,7 +298,7 @@ lib${LIB_PRIVATE}${LIB}${_STATICLIB_SUFFIX}.a: ${OBJS} ${STATICOBJS}
+ 
+ .if !defined(INTERNALLIB)
+ 
+-.if ${MK_PROFILE} != "no" && defined(LIB) && !empty(LIB)
++.if "${MK_PROFILE}" != "no" && defined(LIB) && !empty(LIB)
+ _LIBS+=		lib${LIB_PRIVATE}${LIB}_p.a
+ POBJS+=		${OBJS:.o=.po} ${STATICOBJS:.o=.po}
+ DEPENDOBJS+=	${POBJS}
+@@ -365,11 +365,11 @@ ${SHLIB_NAME_FULL}: ${SOBJS}
+ .endif
+ 	${_LD:N${CCACHE_BIN}} ${LDFLAGS} ${SSP_CFLAGS} ${SOLINKOPTS} \
+ 	    -o ${.TARGET} -Wl,-soname,${SONAME} ${SOBJS} ${LDADD}
+-.if ${MK_CTF} != "no"
++.if "${MK_CTF}" != "no"
+ 	${CTFMERGE} ${CTFFLAGS} -o ${.TARGET} ${SOBJS}
+ .endif
+ 
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ CLEANFILES+=	${SHLIB_NAME_FULL} ${SHLIB_NAME}.debug
+ ${SHLIB_NAME}: ${SHLIB_NAME_FULL} ${SHLIB_NAME}.debug
+ 	${OBJCOPY} --strip-debug --add-gnu-debuglink=${SHLIB_NAME}.debug \
+@@ -427,7 +427,7 @@ all:
+ all: ${_LIBS}
+ .endif
+ 
+-.if ${MK_MAN} != "no" && !defined(LIBRARIES_ONLY)
++.if "${MK_MAN}" != "no" && !defined(LIBRARIES_ONLY)
+ all: all-man
+ .endif
+ .endif
+@@ -496,7 +496,7 @@ _libinstall:
+ .if defined(LIB) && !empty(LIB) && ${MK_INSTALLLIB} != "no"
+ 	${INSTALL} ${TAG_ARGS:D${TAG_ARGS},dev} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
+ 	    ${_INSTALLFLAGS} lib${LIB_PRIVATE}${LIB}${_STATICLIB_SUFFIX}.a ${DESTDIR}${_LIBDIR}/
+-.if ${MK_PROFILE} != "no"
++.if "${MK_PROFILE}" != "no"
+ 	${INSTALL} ${TAG_ARGS:D${TAG_ARGS},dev} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
+ 	    ${_INSTALLFLAGS} lib${LIB_PRIVATE}${LIB}_p.a ${DESTDIR}${_LIBDIR}/
+ .endif
+@@ -505,7 +505,7 @@ _libinstall:
+ 	${INSTALL} ${TAG_ARGS} ${STRIP} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
+ 	    ${_INSTALLFLAGS} ${_SHLINSTALLFLAGS} \
+ 	    ${SHLIB_NAME} ${DESTDIR}${_SHLIBDIR}/
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ .if defined(DEBUGMKDIR)
+ 	${INSTALL} ${TAG_ARGS:D${TAG_ARGS},dbg} -d ${DESTDIR}${DEBUGFILEDIR}/
+ .endif
+@@ -523,7 +523,7 @@ _libinstall:
+ 	    ${DESTDIR}${_LIBDIR}/${_SHLIB_LINK_LINK}
+ .endfor
+ .else
+-.if ${_SHLIBDIR} == ${_LIBDIR}
++.if "${_SHLIBDIR}" == "${_LIBDIR}"
+ .if ${SHLIB_LINK:Mlib*}
+ 	${INSTALL_RSYMLINK} ${_SHLINSTALLSYMLINKFLAGS} ${TAG_ARGS:D${TAG_ARGS},dev} \
+ 	    ${SHLIB_NAME} ${DESTDIR}${_LIBDIR}/${SHLIB_LINK}
+@@ -570,14 +570,14 @@ SYMLINKOWN?=	${LIBOWN}
+ SYMLINKGRP?=	${LIBGRP}
+ .include <bsd.links.mk>
+ 
+-.if ${MK_MAN} != "no" && !defined(LIBRARIES_ONLY)
++.if "${MK_MAN}" != "no" && !defined(LIBRARIES_ONLY)
+ realinstall: maninstall
+ .ORDER: beforeinstall maninstall
+ .endif
+ 
+ .endif
+ 
+-.if ${MK_MAN} != "no" && !defined(LIBRARIES_ONLY)
++.if "${MK_MAN}" != "no" && !defined(LIBRARIES_ONLY)
+ .include <bsd.man.mk>
+ .endif
+ 
+diff --git a/share/mk/bsd.libnames.mk b/share/mk/bsd.libnames.mk
+index db08a5ac7..c211cf1c8 100644
+--- a/share/mk/bsd.libnames.mk
++++ b/share/mk/bsd.libnames.mk
+@@ -186,7 +186,7 @@ LDADD:=	${LDADD:N-lc} -lc
+ # Only do this for src builds.
+ .if defined(SRCTOP)
+ .if defined(_LIBRARIES) && defined(LIB) && \
+-    ${_LIBRARIES:M${LIB}} != ""
++    "${_LIBRARIES:M${LIB}}" != ""
+ .if !defined(LIB${LIB:tu})
+ .error ${.CURDIR}: Missing value for LIB${LIB:tu} in ${_this:T}.  Likely should be: LIB${LIB:tu}?= $${LIBDESTDIR}$${LIBDIR_BASE}/lib${LIB}.a
+ .endif
+diff --git a/share/mk/bsd.linker.mk b/share/mk/bsd.linker.mk
+index 0e9477284..360ad066c 100644
+--- a/share/mk/bsd.linker.mk
++++ b/share/mk/bsd.linker.mk
+@@ -73,12 +73,12 @@ _v=	${_ld_version:M[1-9]*.[0-9]*:[1]}
+ _ld_version:=${_ld_version:[*]:C/^.* LLD /LLD /:[@]}
+ ${X_}LINKER_TYPE=	lld
+ _v=	${_ld_version:[2]}
+-.if ${_ld_version:[3]} == "(FreeBSD"
++.if "${_ld_version:[3]}" == "(FreeBSD"
+ ${X_}LINKER_FREEBSD_VERSION:=	${_ld_version:[4]:C/.*-([^-]*)\)/\1/}
+ .else
+ ${X_}LINKER_FREEBSD_VERSION=	0
+ .endif
+-.elif ${_ld_version:[1]:S/-classic$//} == "@(\#)PROGRAM:ld"
++.elif "${_ld_version:[1]:S/-classic$//}" == "@(\#)PROGRAM:ld"
+ # bootstrap linker on MacOS
+ ${X_}LINKER_TYPE=        mac
+ _v=        ${_ld_version:[2]:C/PROJECT:(ld64|dyld)-//}
+@@ -99,17 +99,17 @@ ${X_}LINKER_VERSION!=	echo "${_v:M[1-9]*.[0-9]*}" | \
+ .undef _ld_version
+ .undef _v
+ ${X_}LINKER_FEATURES=
+-.if ${${X_}LINKER_TYPE} != "bfd" || ${${X_}LINKER_VERSION} > 21750
++.if "${${X_}LINKER_TYPE}" != "bfd" || ${${X_}LINKER_VERSION} > 21750
+ ${X_}LINKER_FEATURES+=	build-id
+ ${X_}LINKER_FEATURES+=	ifunc
+ .endif
+-.if ${${X_}LINKER_TYPE} == "bfd" && ${${X_}LINKER_VERSION} > 21750
++.if "${${X_}LINKER_TYPE}" == "bfd" && ${${X_}LINKER_VERSION} > 21750
+ ${X_}LINKER_FEATURES+=	riscv-relaxations
+ .endif
+-.if ${${X_}LINKER_TYPE} == "lld" && ${${X_}LINKER_VERSION} >= 60000
++.if "${${X_}LINKER_TYPE}" == "lld" && ${${X_}LINKER_VERSION} >= 60000
+ ${X_}LINKER_FEATURES+=	retpoline
+ .endif
+-.if ${${X_}LINKER_TYPE} == "lld" && ${${X_}LINKER_VERSION} >= 90000
++.if "${${X_}LINKER_TYPE}" == "lld" && ${${X_}LINKER_VERSION} >= 90000
+ ${X_}LINKER_FEATURES+=	ifunc-noplt
+ .endif
+ .endif
+diff --git a/share/mk/bsd.obj.mk b/share/mk/bsd.obj.mk
+index 578423914..fbcd6dbfe 100644
+--- a/share/mk/bsd.obj.mk
++++ b/share/mk/bsd.obj.mk
+@@ -46,7 +46,7 @@ __<bsd.obj.mk>__:
+ # but this makefile does not want it!
+ .OBJDIR: ${.CURDIR}
+ .endif
+-.if ${MK_AUTO_OBJ} == "yes"
++.if "${MK_AUTO_OBJ}" == "yes"
+ # it is done by now
+ objwarn: .PHONY
+ obj: .PHONY
+@@ -54,7 +54,7 @@ CANONICALOBJDIR= ${.OBJDIR}
+ # Handle special case where SRCS is full-pathed and requires
+ # nested objdirs.  This duplicates some auto.obj.mk logic.
+ .if (!empty(SRCS:M*/*) || !empty(DPSRCS:M*/*)) && \
+-    (${.TARGETS} == "" || ${.TARGETS:Nclean*:N*clean:Ndestroy*} != "") && \
++    ("${.TARGETS}" == "" || "${.TARGETS:Nclean*:N*clean:Ndestroy*}" != "") && \
+     !make(print-dir) && empty(.MAKEFLAGS:M-[nN])
+ _wantdirs=	${SRCS:M*/*:H} ${DPSRCS:M*/*:H}
+ .if !empty(_wantdirs)
+@@ -78,7 +78,7 @@ __objdir_made != umask ${OBJDIR_UMASK:U002}; ${Mkdirs}; \
+ .endif	# !empty(SRCS:M*/*) || !empty(DPSRCS:M*/*)
+ .elif !empty(MAKEOBJDIRPREFIX)
+ CANONICALOBJDIR:=${MAKEOBJDIRPREFIX}${.CURDIR}
+-.elif defined(MAKEOBJDIR) && ${MAKEOBJDIR:M/*} != ""
++.elif defined(MAKEOBJDIR) && "${MAKEOBJDIR:M/*}" != ""
+ CANONICALOBJDIR:=${MAKEOBJDIR}
+ OBJTOP?= ${MAKEOBJDIR}
+ .else
+@@ -165,7 +165,7 @@ whereobj: .PHONY
+ 
+ # Same check in bsd.progs.mk
+ .if ${CANONICALOBJDIR} != ${.CURDIR} && exists(${CANONICALOBJDIR}/) && \
+-    (${MK_AUTO_OBJ} == "no" || ${.TARGETS:Nclean*:N*clean:Ndestroy*} == "")
++    ("${MK_AUTO_OBJ}" == "no" || "${.TARGETS:Nclean*:N*clean:Ndestroy*}" == "")
+ cleanobj: .PHONY
+ 	-rm -rf ${CANONICALOBJDIR}
+ .else
+@@ -189,7 +189,7 @@ clean: .PHONY
+ .endif
+ .endif
+ .ORDER: clean all
+-.if ${MK_AUTO_OBJ} == "yes"
++.if "${MK_AUTO_OBJ}" == "yes"
+ .ORDER: cleanobj all
+ .ORDER: cleandir all
+ .endif
+@@ -221,7 +221,7 @@ destroy.host: .PHONY .NOMETA
+ 	cd ${_CURDIR} && rm -rf ${HOST_OBJTOP}/${RELDIR:N.}
+ .endif
+ 
+-.if make(destroy-all) && ${RELDIR} == "."
++.if make(destroy-all) && "${RELDIR}" == "."
+ destroy-all: destroy-stage
+ .endif
+ 
+diff --git a/share/mk/bsd.prog.mk b/share/mk/bsd.prog.mk
+index 8c3ba69af..7a4408fe1 100644
+--- a/share/mk/bsd.prog.mk
++++ b/share/mk/bsd.prog.mk
+@@ -12,7 +12,7 @@
+ CFLAGS+=${COPTS}
+ .endif
+ 
+-.if ${MK_ASSERT_DEBUG} == "no"
++.if "${MK_ASSERT_DEBUG}" == "no"
+ CFLAGS+= -DNDEBUG
+ # XXX: shouldn't we ensure that !asserts marks potentially unused variables as
+ # __unused instead of disabling -Werror globally?
+@@ -23,7 +23,7 @@ MK_WERROR=	no
+ CFLAGS+=${DEBUG_FLAGS}
+ CXXFLAGS+=${DEBUG_FLAGS}
+ 
+-.if ${MK_CTF} != "no" && ${DEBUG_FLAGS:M-g} != ""
++.if "${MK_CTF}" != "no" && "${DEBUG_FLAGS:M-g}" != ""
+ CTFFLAGS+= -g
+ .endif
+ .endif
+@@ -37,30 +37,30 @@ MK_DEBUG_FILES=	no
+ .endif
+ 
+ # ELF hardening knobs
+-.if ${MK_BIND_NOW} != "no"
++.if "${MK_BIND_NOW}" != "no"
+ LDFLAGS+= -Wl,-znow
+ .endif
+-.if ${LINKER_TYPE} != "mac"
+-.if ${MK_RELRO} == "no"
++.if "${LINKER_TYPE}" != "mac"
++.if "${MK_RELRO}" == "no"
+ LDFLAGS+= -Wl,-znorelro
+ .else
+ LDFLAGS+= -Wl,-zrelro
+ .endif
+ .endif
+-.if ${MK_PIE} != "no"
++.if "${MK_PIE}" != "no"
+ # Static PIE is not yet supported/tested.
+-.if !defined(NO_SHARED) || ${NO_SHARED:tl} == "no"
++.if !defined(NO_SHARED) || "${NO_SHARED:tl}" == "no"
+ CFLAGS+= -fPIE
+ CXXFLAGS+= -fPIE
+ LDFLAGS+= -pie
+ .endif
+ .endif
+-.if ${MK_RETPOLINE} != "no"
++.if "${MK_RETPOLINE}" != "no"
+ .if ${COMPILER_FEATURES:Mretpoline} && ${LINKER_FEATURES:Mretpoline}
+ CFLAGS+= -mretpoline
+ CXXFLAGS+= -mretpoline
+ # retpolineplt is broken with static linking (PR 233336)
+-.if !defined(NO_SHARED) || ${NO_SHARED:tl} == "no"
++.if !defined(NO_SHARED) || "${NO_SHARED:tl}" == "no"
+ LDFLAGS+= -Wl,-zretpolineplt
+ .endif
+ .else
+@@ -71,18 +71,18 @@ LDFLAGS+= -Wl,-zretpolineplt
+ LDFLAGS.bfd+= -Wl,-znoexecstack
+ 
+ # Initialize stack variables on function entry
+-.if ${MK_INIT_ALL_ZERO} == "yes"
++.if "${MK_INIT_ALL_ZERO}" == "yes"
+ .if ${COMPILER_FEATURES:Minit-all}
+ CFLAGS+= -ftrivial-auto-var-init=zero
+ CXXFLAGS+= -ftrivial-auto-var-init=zero
+-.if ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} < 160000
++.if "${COMPILER_TYPE}" == "clang" && ${COMPILER_VERSION} < 160000
+ CFLAGS+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+ CXXFLAGS+= -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang
+ .endif
+ .else
+ .warning InitAll (zeros) requested but not supported by compiler
+ .endif
+-.elif ${MK_INIT_ALL_PATTERN} == "yes"
++.elif "${MK_INIT_ALL_PATTERN}" == "yes"
+ .if ${COMPILER_FEATURES:Minit-all}
+ CFLAGS+= -ftrivial-auto-var-init=pattern
+ CXXFLAGS+= -ftrivial-auto-var-init=pattern
+@@ -94,14 +94,14 @@ CXXFLAGS+= -ftrivial-auto-var-init=pattern
+ # bsd.sanitizer.mk is not installed, so don't require it (e.g. for ports).
+ .sinclude "bsd.sanitizer.mk"
+ 
+-.if ${MACHINE_CPUARCH} == "riscv" && ${LINKER_FEATURES:Mriscv-relaxations} == ""
++.if "${MACHINE_CPUARCH}" == "riscv" && "${LINKER_FEATURES:Mriscv-relaxations}" == ""
+ CFLAGS += -mno-relax
+ .endif
+ 
+ .if defined(CRUNCH_CFLAGS)
+ CFLAGS+=${CRUNCH_CFLAGS}
+ .else
+-.if ${MK_DEBUG_FILES} != "no" && empty(DEBUG_FLAGS:M-g) && \
++.if "${MK_DEBUG_FILES}" != "no" && empty(DEBUG_FLAGS:M-g) && \
+     empty(DEBUG_FLAGS:M-gdwarf-*)
+ .if !${COMPILER_FEATURES:Mcompressed-debug}
+ CFLAGS+= ${DEBUG_FILES_CFLAGS:N-gz*}
+@@ -123,19 +123,19 @@ TAGS+=		package=${PACKAGE:Uutilities}
+ TAG_ARGS=	-T ${TAGS:[*]:S/ /,/g}
+ .endif
+ 
+-.if defined(NO_SHARED) && ${NO_SHARED:tl} != "no"
++.if defined(NO_SHARED) && "${NO_SHARED:tl}" != "no"
+ LDFLAGS+= -static
+ .endif
+ 
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ PROG_FULL=${PROG}.full
+ # Use ${DEBUGDIR} for base system debug files, else .debug subdirectory
+ .if defined(BINDIR) && (\
+-    ${BINDIR} == "/bin" ||\
+-    ${BINDIR:C%/libexec(/.*)?%/libexec%} == "/libexec" ||\
+-    ${BINDIR} == "/sbin" ||\
+-    ${BINDIR:C%/usr/(bin|bsdinstall|libexec|lpr|sendmail|sm.bin|sbin|tests)(/.*)?%/usr/bin%} == "/usr/bin" ||\
+-    ${BINDIR} == "/usr/lib" \
++    "${BINDIR}" == "/bin" ||\
++    "${BINDIR:C%/libexec(/.*)?%/libexec%}" == "/libexec" ||\
++    "${BINDIR}" == "/sbin" ||\
++    "${BINDIR:C%/usr/(bin|bsdinstall|libexec|lpr|sendmail|sm.bin|sbin|tests)(/.*)?%/usr/bin%}" == "/usr/bin" ||\
++    "${BINDIR}" == "/usr/lib" \
+      )
+ DEBUGFILEDIR=	${DEBUGDIR}${BINDIR}
+ .else
+@@ -171,7 +171,7 @@ ${PROG_FULL}: ${OBJS}
+ 	${CC:N${CCACHE_BIN}} ${CFLAGS:N-M*} ${LDFLAGS} -o ${.TARGET} ${OBJS} \
+ 	    ${LDADD}
+ .endif
+-.if ${MK_CTF} != "no"
++.if "${MK_CTF}" != "no"
+ 	${CTFMERGE} ${CTFFLAGS} -o ${.TARGET} ${OBJS}
+ .endif
+ 
+@@ -206,14 +206,14 @@ ${PROG_FULL}: ${OBJS}
+ 	${CC:N${CCACHE_BIN}} ${CFLAGS:N-M*} ${LDFLAGS} -o ${.TARGET} ${OBJS} \
+ 	    ${LDADD}
+ .endif
+-.if ${MK_CTF} != "no"
++.if "${MK_CTF}" != "no"
+ 	${CTFMERGE} ${CTFFLAGS} -o ${.TARGET} ${OBJS}
+ .endif
+ .endif # !target(${PROG})
+ 
+ .endif # !defined(SRCS)
+ 
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ ${PROG}: ${PROG_FULL} ${PROGNAME}.debug
+ 	${OBJCOPY} --strip-debug --add-gnu-debuglink=${PROGNAME}.debug \
+ 	    ${PROG_FULL} ${.TARGET}
+@@ -232,7 +232,7 @@ ${PROG_FULL}.ll: ${LLOBJS}
+ CLEANFILES+=	${PROG_FULL}.bc ${PROG_FULL}.ll
+ .endif # defined(LLVM_LINK)
+ 
+-.if	${MK_MAN} != "no" && !defined(MAN) && \
++.if	"${MK_MAN}" != "no" && !defined(MAN) && \
+ 	!defined(MAN1) && !defined(MAN2) && !defined(MAN3) && \
+ 	!defined(MAN4) && !defined(MAN5) && !defined(MAN6) && \
+ 	!defined(MAN7) && !defined(MAN8) && !defined(MAN9)
+@@ -250,14 +250,14 @@ all: ${PROG} ${SCRIPTS} afterbuild
+ .else
+ all: ${PROG} ${SCRIPTS}
+ .endif
+-.if ${MK_MAN} != "no"
++.if "${MK_MAN}" != "no"
+ all: all-man
+ .endif
+ .endif
+ 
+ .if defined(PROG)
+ CLEANFILES+= ${PROG} ${PROG}.bc ${PROG}.ll
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ CLEANFILES+= ${PROG_FULL} ${PROGNAME}.debug
+ .endif
+ .endif
+@@ -305,7 +305,7 @@ _proginstall:
+ .if defined(PROG)
+ 	${INSTALL} ${TAG_ARGS} ${STRIP} -o ${BINOWN} -g ${BINGRP} -m ${BINMODE} \
+ 	    ${_INSTALLFLAGS} ${PROG} ${DESTDIR}${BINDIR}/${PROGNAME}
+-.if ${MK_DEBUG_FILES} != "no"
++.if "${MK_DEBUG_FILES}" != "no"
+ .if defined(DEBUGMKDIR)
+ 	${INSTALL} ${TAG_ARGS:D${TAG_ARGS},dbg} -d ${DESTDIR}${DEBUGFILEDIR}/
+ .endif
+@@ -360,14 +360,14 @@ LINKGRP?=	${BINGRP}
+ LINKMODE?=	${BINMODE}
+ .include <bsd.links.mk>
+ 
+-.if ${MK_MAN} != "no"
++.if "${MK_MAN}" != "no"
+ realinstall: maninstall
+ .ORDER: beforeinstall maninstall
+ .endif
+ 
+ .endif	# !target(install)
+ 
+-.if ${MK_MAN} != "no"
++.if "${MK_MAN}" != "no"
+ .include <bsd.man.mk>
+ .endif
+ 
+diff --git a/share/mk/bsd.subdir.mk b/share/mk/bsd.subdir.mk
+index 72e835d97..3d3d29fd9 100644
+--- a/share/mk/bsd.subdir.mk
++++ b/share/mk/bsd.subdir.mk
+@@ -37,7 +37,7 @@
+ .if !target(__<bsd.subdir.mk>__)
+ __<bsd.subdir.mk>__:
+ 
+-.if ${MK_AUTO_OBJ} == "no"
++.if "${MK_AUTO_OBJ}" == "no"
+ _obj=	obj
+ .endif
+ 
+@@ -63,7 +63,7 @@ STANDALONE_SUBDIR_TARGETS+= realinstall
+ 
+ .include <bsd.init.mk>
+ 
+-.if ${MK_META_MODE} == "yes"
++.if "${MK_META_MODE}" == "yes"
+ .MAKE.JOB.PREFIX=
+ ECHODIR=	:
+ .endif
+@@ -72,21 +72,21 @@ ECHODIR=	:
+ NEED_SUBDIR=	1
+ ECHODIR=	:
+ .SILENT:
+-.if ${RELDIR:U.} != "."
++.if "${RELDIR:U.}" != "."
+ print-dir:	.PHONY
+ 	@echo ${RELDIR}
+ .endif
+ .endif
+ 
+-.if ${MK_AUTO_OBJ} == "yes" && !target(obj)
++.if "${MK_AUTO_OBJ}" == "yes" && !target(obj)
+ obj: .PHONY
+ .endif
+ 
+ .if !defined(NEED_SUBDIR)
+ # .MAKE.DEPENDFILE==/dev/null is set by bsd.dep.mk to avoid reading
+ # Makefile.depend
+-.if ${.MAKE.LEVEL} == 0 && ${MK_DIRDEPS_BUILD} == "yes" && !empty(SUBDIR) && \
+-    ${.MAKE.DEPENDFILE} != "/dev/null"
++.if ${.MAKE.LEVEL} == 0 && "${MK_DIRDEPS_BUILD}" == "yes" && !empty(SUBDIR) && \
++    "${.MAKE.DEPENDFILE}" != "/dev/null"
+ .include <meta.subdir.mk>
+ # ignore this
+ _SUBDIR:
+diff --git a/share/mk/bsd.sys.mk b/share/mk/bsd.sys.mk
+index 2b1a3e103..d005cbe11 100644
+--- a/share/mk/bsd.sys.mk
++++ b/share/mk/bsd.sys.mk
+@@ -13,11 +13,11 @@
+ # the default is gnu99 for now
+ CSTD?=		gnu99
+ 
+-.if ${CSTD} == "c89" || ${CSTD} == "c90"
++.if "${CSTD}" == "c89" || "${CSTD}" == "c90"
+ CFLAGS+=	-std=iso9899:1990
+-.elif ${CSTD} == "c94" || ${CSTD} == "c95"
++.elif "${CSTD}" == "c94" || "${CSTD}" == "c95"
+ CFLAGS+=	-std=iso9899:199409
+-.elif ${CSTD} == "c99"
++.elif "${CSTD}" == "c99"
+ CFLAGS+=	-std=iso9899:1999
+ .else # CSTD
+ CFLAGS+=	-std=${CSTD}
+@@ -40,16 +40,16 @@ WARNS=	${DEFAULTWARNS}
+ .if defined(WARNS)
+ .if ${WARNS} >= 1
+ CWARNFLAGS+=	-Wsystem-headers
+-.if ${MK_WERROR} != "no" && ${MK_WERROR.${COMPILER_TYPE}:Uyes} != "no"
++.if "${MK_WERROR}" != "no" && "${MK_WERROR.${COMPILER_TYPE}:Uyes}" != "no"
+ CWARNFLAGS+=	-Werror
+-.endif # ${MK_WERROR} != "no" && ${MK_WERROR.${COMPILER_TYPE}:Uyes} != "no"
++.endif # "${MK_WERROR}" != "no" && "${MK_WERROR.${COMPILER_TYPE}:Uyes}" != "no"
+ .endif # WARNS >= 1
+ .if ${WARNS} >= 2
+ CWARNFLAGS+=	-Wall -Wno-format-y2k
+ .endif # WARNS >= 2
+ .if ${WARNS} >= 3
+ CWARNFLAGS+=	-W -Wno-unused-parameter
+-.if ${COMPILER_TYPE} == "clang"
++.if "${COMPILER_TYPE}" == "clang"
+ CWARNFLAGS+=	-Wstrict-prototypes
+ .endif
+ CWARNFLAGS+=	-Wmissing-prototypes -Wpointer-arith
+@@ -94,7 +94,7 @@ CWARNFLAGS.clang+=	-Wno-tautological-compare -Wno-unused-value\
+ 		-Wno-parentheses-equality -Wno-unused-function -Wno-enum-conversion
+ CWARNFLAGS.clang+=	-Wno-unused-local-typedef
+ CWARNFLAGS.clang+=	-Wno-address-of-packed-member
+-.if ${COMPILER_TYPE} == "gcc" && ${COMPILER_VERSION} >= 90100
++.if "${COMPILER_TYPE}" == "gcc" && ${COMPILER_VERSION} >= 90100
+ CWARNFLAGS.gcc+=	-Wno-address-of-packed-member
+ .endif
+ .endif # WARNS <= 3
+@@ -108,31 +108,31 @@ CWARNFLAGS.clang+=	-Wno-parentheses
+ CWARNFLAGS.clang+=	-Wno-array-bounds
+ .endif # NO_WARRAY_BOUNDS
+ .if defined(NO_WMISLEADING_INDENTATION) && \
+-    ((${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} >= 100000) || \
+-      ${COMPILER_TYPE} == "gcc")
++    (("${COMPILER_TYPE}" == "clang" && ${COMPILER_VERSION} >= 100000) || \
++      "${COMPILER_TYPE}" == "gcc")
+ CWARNFLAGS+=		-Wno-misleading-indentation
+ .endif # NO_WMISLEADING_INDENTATION
+ .if ${COMPILER_VERSION} >= 130000
+ NO_WUNUSED_BUT_SET_VARIABLE=	-Wno-unused-but-set-variable
+ .endif
+-.if ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} >= 140000
++.if "${COMPILER_TYPE}" == "clang" && ${COMPILER_VERSION} >= 140000
+ NO_WBITWISE_INSTEAD_OF_LOGICAL=	-Wno-bitwise-instead-of-logical
+ .endif
+-.if ${COMPILER_TYPE} == "clang" && ${COMPILER_VERSION} >= 150000
++.if "${COMPILER_TYPE}" == "clang" && ${COMPILER_VERSION} >= 150000
+ NO_WARRAY_PARAMETER=	-Wno-array-parameter
+ NO_WSTRICT_PROTOTYPES=	-Wno-strict-prototypes
+ NO_WDEPRECATED_NON_PROTOTYPE=-Wno-deprecated-non-prototype
+ .endif
+-.if ${COMPILER_TYPE} == "gcc" && ${COMPILER_VERSION} >= 50200
++.if "${COMPILER_TYPE}" == "gcc" && ${COMPILER_VERSION} >= 50200
+ NO_WUNUSED_BUT_SET_VARIABLE=-Wno-unused-but-set-variable
+ .endif
+-.if ${COMPILER_TYPE} == "gcc" && ${COMPILER_VERSION} >= 100100
++.if "${COMPILER_TYPE}" == "gcc" && ${COMPILER_VERSION} >= 100100
+ NO_WZERO_LENGTH_BOUNDS=	-Wno-zero-length-bounds
+ .endif
+-.if ${COMPILER_TYPE} == "gcc" && ${COMPILER_VERSION} >= 110100
++.if "${COMPILER_TYPE}" == "gcc" && ${COMPILER_VERSION} >= 110100
+ NO_WARRAY_PARAMETER=	-Wno-array-parameter
+ .endif
+-.if ${COMPILER_TYPE} == "gcc" && ${COMPILER_VERSION} >= 120100
++.if "${COMPILER_TYPE}" == "gcc" && ${COMPILER_VERSION} >= 120100
+ NO_WUSE_AFTER_FREE=	-Wno-use-after-free
+ NO_WDANGLING_POINTER=	-Wno-dangling-pointer
+ .endif
+@@ -148,7 +148,7 @@ CWARNFLAGS+=	-Wformat=2 -Wno-format-extra-args
+ .if ${WARNS:U0} <= 3
+ CWARNFLAGS.clang+=	-Wno-format-nonliteral
+ .endif # WARNS <= 3
+-.if ${MK_WERROR} != "no" && ${MK_WERROR.${COMPILER_TYPE}:Uyes} != "no"
++.if "${MK_WERROR}" != "no" && "${MK_WERROR.${COMPILER_TYPE}:Uyes}" != "no"
+ CWARNFLAGS+=	-Werror
+ .endif # ${MK_WERROR} != "no" && ${MK_WERROR.${COMPILER_TYPE}:Uyes} != "no"
+ .endif # WFORMAT > 0
+@@ -163,7 +163,7 @@ CWARNFLAGS+=	-Wno-format
+ # The base system requires at least GCC 6.4, but some ports
+ # use this file with older compilers.  Request an exprun
+ # before changing these.
+-.if ${COMPILER_TYPE} == "gcc"
++.if "${COMPILER_TYPE}" == "gcc"
+ # GCC 5.2.0
+ .if ${COMPILER_VERSION} >= 50200
+ CWARNFLAGS+=	-Wno-error=address			\
+@@ -221,7 +221,7 @@ CWARNFLAGS+=	-Wno-error=aggressive-loop-optimizations	\
+ 
+ # GCC 9.2.0
+ .if ${COMPILER_VERSION} >= 90200
+-.if ${MACHINE_ARCH} == "i386"
++.if "${MACHINE_ARCH}" == "i386"
+ CWARNFLAGS+=	-Wno-error=overflow
+ .endif
+ .endif
+@@ -239,14 +239,14 @@ CXXWARNFLAGS+=	-Wno-literal-suffix 			\
+ CWARNFLAGS+=	-Wno-return-type
+ 
+ # GCC's own arm_neon.h triggers various warnings
+-.if ${MACHINE_CPUARCH} == "aarch64"
++.if "${MACHINE_CPUARCH}" == "aarch64"
+ CWARNFLAGS+=	-Wno-system-headers
+ .endif
+ .endif	# gcc
+ 
+ # How to handle FreeBSD custom printf format specifiers.
+-.if ${COMPILER_TYPE} == "clang" || \
+-    (${COMPILER_TYPE} == "gcc" && ${COMPILER_VERSION} >= 120100)
++.if "${COMPILER_TYPE}" == "clang" || \
++    ("${COMPILER_TYPE}" == "gcc" && ${COMPILER_VERSION} >= 120100)
+ FORMAT_EXTENSIONS=	-D__printf__=__freebsd_kprintf__
+ .else
+ FORMAT_EXTENSIONS=	-fformat-extensions
+@@ -259,7 +259,7 @@ CWARNFLAGS+=	-Wno-unknown-pragmas
+ # This warning is utter nonsense
+ CFLAGS+=	-Wno-format-zero-length
+ 
+-.if ${COMPILER_TYPE} == "clang"
++.if "${COMPILER_TYPE}" == "clang"
+ # The headers provided by clang are incompatible with the FreeBSD headers.
+ # If the version of clang is not one that has been patched to omit the
+ # incompatible headers, we need to compile with -nobuiltininc and add the
+@@ -268,8 +268,8 @@ CFLAGS+=	-Wno-format-zero-length
+ #
+ # XXX: This is a hack to support complete external installs of clang while
+ # we work to synchronize our decleration guards with those in the clang tree.
+-.if ${MK_CLANG_BOOTSTRAP:Uno} == "no" && \
+-    ${COMPILER_RESOURCE_DIR} != "unknown" && !defined(BOOTSTRAPPING)
++.if "${MK_CLANG_BOOTSTRAP:Uno}" == "no" && \
++    "${COMPILER_RESOURCE_DIR}" != "unknown" && !defined(BOOTSTRAPPING)
+ CFLAGS+=-nobuiltininc -idirafter ${COMPILER_RESOURCE_DIR}/include
+ .endif
+ .endif
+@@ -287,7 +287,7 @@ CFLAGS.clang+=	 -Qunused-arguments
+ # but not yet.
+ CXXFLAGS.clang+=	 -Wno-c++11-extensions
+ 
+-.if ${MK_SSP} != "no"
++.if "${MK_SSP}" != "no"
+ # Don't use -Wstack-protector as it breaks world with -Werror.
+ SSP_CFLAGS?=	-fstack-protector-strong
+ CFLAGS+=	${SSP_CFLAGS}
+@@ -299,7 +299,7 @@ DEBUG_FILES_CFLAGS?= -g -gz=zlib
+ 
+ # Allow user-specified additional warning flags, plus compiler and file
+ # specific flag overrides, unless we've overridden this...
+-.if ${MK_WARNS} != "no"
++.if "${MK_WARNS}" != "no"
+ CFLAGS+=	${CWARNFLAGS:M*} ${CWARNFLAGS.${COMPILER_TYPE}}
+ CFLAGS+=	${CWARNFLAGS.${.IMPSRC:T}}
+ CXXFLAGS+=	${CXXWARNFLAGS:M*} ${CXXWARNFLAGS.${COMPILER_TYPE}}
+@@ -329,7 +329,7 @@ LDFLAGS+=	${LDFLAGS.${LINKER_TYPE}}
+ # flags. Ideally the different sources of CFLAGS would be namespaced to avoid
+ # collisions.
+ .if !defined(_RECURSING_PROGS) && !defined(NO_TARGET_FLAGS)
+-.if ${MK_WARNS} != "no"
++.if "${MK_WARNS}" != "no"
+ CFLAGS+=	${CWARNFLAGS.${.TARGET:T}}
+ .endif
+ CFLAGS+=	${CFLAGS.${.TARGET:T}}
+@@ -347,21 +347,21 @@ CFLAGS+=	ERROR-tried-to-rebuild-during-make-install
+ .endif
+ 
+ # Please keep this if in sync with kern.mk
+-.if ${LD} != "ld" && (${CC:[1]:H} != ${LD:[1]:H} || ${LD:[1]:T} != "ld")
++.if "${LD}" != "ld" && (${CC:[1]:H} != ${LD:[1]:H} || "${LD:[1]:T}" != "ld")
+ # Add -fuse-ld=${LD} if $LD is in a different directory or not called "ld".
+-.if ${COMPILER_TYPE} == "clang"
++.if "${COMPILER_TYPE}" == "clang"
+ # Note: Clang does not like relative paths for ld so we map ld.lld -> lld.
+ .if ${COMPILER_VERSION} >= 120000
+ LDFLAGS+=	--ld-path=${LD:[1]:S/^ld.//1W}
+ .else
+ LDFLAGS+=	-fuse-ld=${LD:[1]:S/^ld.//1W}
+ .endif
+-.elif ${COMPILER_TYPE} == "gcc"
++.elif "${COMPILER_TYPE}" == "gcc"
+ # GCC does not support an absolute path for -fuse-ld so we just print this
+ # warning instead and let the user add the required symlinks.
+ # However, we can avoid this warning if -B is set appropriately (e.g. for
+ # CROSS_TOOLCHAIN=...-gcc).
+-.if !(${LD:[1]:T} == "ld" && ${CC:tw:M-B${LD:[1]:H}/})
++.if !("${LD:[1]:T}" == "ld" && ${CC:tw:M-B${LD:[1]:H}/})
+ .warning LD (${LD}) is not the default linker for ${CC} but -fuse-ld= is not supported
+ .endif
+ .endif
+@@ -381,11 +381,11 @@ PHONY_NOTMAIN = analyze afterdepend afterinstall all beforedepend beforeinstall
+ .PHONY: ${PHONY_NOTMAIN:N${PROG:U}}
+ .NOTMAIN: ${PHONY_NOTMAIN:Nall}
+ 
+-.if ${MK_STAGING} != "no"
++.if "${MK_STAGING}" != "no"
+ .if defined(_SKIP_BUILD) || (!make(all) && !make(clean*) && !make(*clean))
+ _SKIP_STAGING?= yes
+ .endif
+-.if ${_SKIP_STAGING:Uno} == "yes"
++.if "${_SKIP_STAGING:Uno}" == "yes"
+ staging stage_libs stage_files stage_as stage_links stage_symlinks:
+ .else
+ # allow targets like beforeinstall to be leveraged
+@@ -393,13 +393,13 @@ DESTDIR= ${STAGE_OBJTOP}
+ .export DESTDIR
+ 
+ .if target(beforeinstall)
+-.if !empty(_LIBS) || (${MK_STAGING_PROG} != "no" && !defined(INTERNALPROG))
++.if !empty(_LIBS) || ("${MK_STAGING_PROG}" != "no" && !defined(INTERNALPROG))
+ staging: beforeinstall
+ .endif
+ .endif
+ 
+ # normally only libs and includes are staged
+-.if ${MK_STAGING_PROG} != "no" && !defined(INTERNALPROG)
++.if "${MK_STAGING_PROG}" != "no" && !defined(INTERNALPROG)
+ STAGE_DIR.prog= ${STAGE_OBJTOP}${BINDIR}
+ 
+ .if !empty(PROG)
+@@ -416,7 +416,7 @@ STAGE_TARGETS+= stage_files
+ .endif
+ 
+ .if !empty(_LIBS) && !defined(INTERNALLIB)
+-.if defined(SHLIBDIR) && ${SHLIBDIR} != ${LIBDIR} && ${_LIBS:Uno:M*.so.*} != ""
++.if defined(SHLIBDIR) && ${SHLIBDIR} != ${LIBDIR} && "${_LIBS:Uno:M*.so.*}" != ""
+ STAGE_SETS+= shlib
+ STAGE_DIR.shlib= ${STAGE_OBJTOP}${SHLIBDIR}
+ STAGE_FILES.shlib+= ${_LIBS:M*.so.*}
+@@ -471,7 +471,7 @@ STAGE_TARGETS+= $t
+ STAGE_TARGETS+= stage_as
+ .endif
+ 
+-.if !empty(STAGE_TARGETS) || (${MK_STAGING_PROG} != "no" && !defined(INTERNALPROG))
++.if !empty(STAGE_TARGETS) || ("${MK_STAGING_PROG}" != "no" && !defined(INTERNALPROG))
+ 
+ .if !empty(LINKS)
+ STAGE_TARGETS+= stage_links
+diff --git a/share/mk/dirdeps-targets.mk b/share/mk/dirdeps-targets.mk
+index 6201efe1e..bfbfecbc6 100644
+--- a/share/mk/dirdeps-targets.mk
++++ b/share/mk/dirdeps-targets.mk
+@@ -78,12 +78,12 @@ DIRDEPS_TARGETS_MACHINE_LIST := ${DIRDEPS_TARGETS_MACHINE_LIST:O:u}
+ 
+ # raw Makefile.depend* list
+ tdeps != 'cd' ${SRCTOP} && 'ls' -1 ${tdirs:O:u:@d@$d/${.MAKE.DEPENDFILE_PREFIX}*@:S,^./,,} 2> /dev/null; echo
+-.if ${DEBUG_DIRDEPS_TARGETS:U:Mdep*} != ""
++.if "${DEBUG_DIRDEPS_TARGETS:U:Mdep*}" != ""
+ .info tdeps=${tdeps}
+ .endif
+ # remove things we know we don't want
+ tdeps := ${tdeps:${DIRDEPS_TARGETS_SKIP_LIST:${M_ListToSkip}}}
+-.if ${DEBUG_DIRDEPS_TARGETS:U:Mdep*} != ""
++.if "${DEBUG_DIRDEPS_TARGETS:U:Mdep*}" != ""
+ .info tdeps=${tdeps}
+ .endif
+ 
+@@ -159,7 +159,7 @@ MK_DIRDEPS_CACHE = yes
+ 
+ # allow a top-level makefile to do other stuff
+ # before including dirdeps.mk
+-.if ${MK_DIRDEPS_TARGETS_INCLUDE_DIRDEPS:Uyes} == "yes"
++.if "${MK_DIRDEPS_TARGETS_INCLUDE_DIRDEPS:Uyes}" == "yes"
+ .include <dirdeps.mk>
+ .endif
+ 
+diff --git a/share/mk/dirdeps.mk b/share/mk/dirdeps.mk
+index 2cf62bed3..c0278c508 100644
+--- a/share/mk/dirdeps.mk
++++ b/share/mk/dirdeps.mk
+@@ -92,7 +92,7 @@
+ #		# Always list MACHINE first,
+ #		# other variables might be optional.
+ #		TARGET_SPEC_VARS = MACHINE TARGET_OS
+-#		.if ${TARGET_SPEC:Uno:M*,*} != ""
++#		.if "${TARGET_SPEC:Uno:M*,*}" != ""
+ #		_tspec := ${TARGET_SPEC:S/,/ /g}
+ #		MACHINE := ${_tspec:[1]}
+ #		TARGET_OS := ${_tspec:[2]}
+@@ -181,7 +181,7 @@ _DIRDEP_USE_LEVEL?= 0
+ _CURDIR ?= ${.CURDIR}
+ _OBJDIR ?= ${.OBJDIR}
+ 
+-.if ${MAKEFILE:T} == ${.PARSEFILE} && empty(DIRDEPS) && ${.TARGETS:Uall:M*[/.]*} != ""
++.if ${MAKEFILE:T} == ${.PARSEFILE} && empty(DIRDEPS) && "${.TARGETS:Uall:M*[/.]*}" != ""
+ # This little trick let's us do
+ #
+ # mk -f dirdeps.mk some/dir.${TARGET_SPEC}
+@@ -193,7 +193,7 @@ DIRDEPS := ${.TARGETS:M*[/.]*}
+ DEP_RELDIR := ${DIRDEPS:[1]:R}
+ # this will become DEP_MACHINE below
+ TARGET_MACHINE := ${DIRDEPS:[1]:E:C/,.*//}
+-.if ${TARGET_MACHINE:N*/*} == ""
++.if "${TARGET_MACHINE:N*/*}" == ""
+ TARGET_MACHINE := ${MACHINE}
+ .endif
+ # disable DIRDEPS_CACHE as it does not like this trick
+@@ -267,7 +267,7 @@ M_dep_qual_fixes.host32 = ${M_dep_qual_fixes.host}
+ # .MAKE.DEPENDFILE_PREFERENCE makes the logic below neater?
+ # you really want this set by sys.mk or similar
+ .MAKE.DEPENDFILE_PREFERENCE = ${_CURDIR}/${.MAKE.DEPENDFILE:T}
+-.if ${.MAKE.DEPENDFILE:E} == "${TARGET_SPEC}"
++.if "${.MAKE.DEPENDFILE:E}" == "${TARGET_SPEC}"
+ .if ${TARGET_SPEC} != ${MACHINE}
+ .MAKE.DEPENDFILE_PREFERENCE += ${_CURDIR}/${.MAKE.DEPENDFILE:T:R}.$${MACHINE}
+ .endif
+@@ -312,12 +312,12 @@ beforedirdeps:
+ 
+ .endif				# !target(_DIRDEP_USE)
+ 
+-.if ${DEBUG_DIRDEPS:@x@${DEP_RELDIR:M$x}${${DEP_RELDIR}.${DEP_MACHINE}:L:M$x}@} != ""
++.if "${DEBUG_DIRDEPS:@x@${DEP_RELDIR:M$x}${${DEP_RELDIR}.${DEP_MACHINE}:L:M$x}@}" != ""
+ _debug_reldir = 1
+ .else
+ _debug_reldir = 0
+ .endif
+-.if ${DEBUG_DIRDEPS:@x@${DEP_RELDIR:M$x}${${DEP_RELDIR}.depend depend:L:M$x}@} != ""
++.if "${DEBUG_DIRDEPS:@x@${DEP_RELDIR:M$x}${${DEP_RELDIR}.depend depend:L:M$x}@}" != ""
+ _debug_search = 1
+ .else
+ _debug_search = 0
+@@ -331,7 +331,7 @@ _debug_search = 0
+ .if empty(_DEP_TARGET_SPEC)
+ DEP_MACHINE = ${TARGET_MACHINE:U${MACHINE}}
+ _DEP_TARGET_SPEC := ${DEP_TARGET_SPEC}
+-.if ${.INCLUDEDFROMFILE:U:M${.MAKE.DEPENDFILE_PREFIX}*} != ""
++.if "${.INCLUDEDFROMFILE:U:M${.MAKE.DEPENDFILE_PREFIX}*}" != ""
+ # record that we've read dependfile for this
+ _dirdeps_checked.${_CURDIR}.${TARGET_SPEC}:
+ .endif
+@@ -364,13 +364,13 @@ MK_DIRDEPS_CACHE ?= no
+ BUILD_DIRDEPS_CACHE ?= no
+ BUILD_DIRDEPS ?= yes
+ 
+-.if ${MK_DIRDEPS_CACHE} == "yes"
++.if "${MK_DIRDEPS_CACHE}" == "yes"
+ # this is where we will cache all our work
+ DIRDEPS_CACHE ?= ${_OBJDIR:tA}/dirdeps.cache${_TARGETS:U${.TARGETS}:Nall:O:u:ts-:S,/,_,g:S,^,.,:N.}
+ .endif
+ 
+ # sanity check: Makefile.depend.options should *not* include us
+-.if ${.INCLUDEDFROMFILE:U:M${.MAKE.DEPENDFILE_PREFIX}.options} != ""
++.if "${.INCLUDEDFROMFILE:U:M${.MAKE.DEPENDFILE_PREFIX}.options}" != ""
+ .error ${DEP_RELDIR}/${.MAKE.DEPENDFILE_PREFIX}.options: should include dirdeps-options.mk
+ .endif
+ 
+@@ -573,7 +573,7 @@ dirdeps-cached:	${DIRDEPS_CACHE} .MAKE
+ 		dirdeps MK_DIRDEPS_CACHE=no BUILD_DIRDEPS=no
+ 
+ # leaf makefiles rarely work for building DIRDEPS_CACHE
+-.if ${RELDIR} != "."
++.if "${RELDIR}" != "."
+ BUILD_DIRDEPS_MAKEFILE ?= -f dirdeps.mk
+ .endif
+ 
+@@ -581,7 +581,7 @@ BUILD_DIRDEPS_MAKEFILE ?= -f dirdeps.mk
+ BUILD_DIRDEPS_MAKEFILE ?=
+ BUILD_DIRDEPS_TARGETS ?= ${.TARGETS}
+ 
+-.if ${DIRDEPS_CACHE} != ${STATIC_DIRDEPS_CACHE:Uno} && ${DIRDEPS_CACHE:M${SRCTOP}/*} == ""
++.if ${DIRDEPS_CACHE} != ${STATIC_DIRDEPS_CACHE:Uno} && "${DIRDEPS_CACHE:M${SRCTOP}/*}" == ""
+ # export this for dirdeps-cache-update.mk
+ DYNAMIC_DIRDEPS_CACHE := ${DIRDEPS_CACHE}
+ .export DYNAMIC_DIRDEPS_CACHE
+@@ -623,13 +623,13 @@ _count_dirdeps: .NOMETA
+ .endif
+ .endif
+ 
+-.if ${BUILD_DIRDEPS} == "yes"
++.if "${BUILD_DIRDEPS}" == "yes"
+ 
+ # the rest is done repeatedly for every Makefile.depend we read.
+ # if we are anything but the original dir we care only about the
+ # machine type we were included for..
+ 
+-.if ${DEP_RELDIR} == "."
++.if "${DEP_RELDIR}" == "."
+ _this_dir := ${SRCTOP}
+ .else
+ _this_dir := ${SRCTOP}/${DEP_RELDIR}
+@@ -647,9 +647,9 @@ _machines := ${DEP_MACHINE}
+ # this is the machine list we actually use below
+ _machines := ${_only_machines}
+ 
+-.if defined(HOSTPROG) || ${DEP_MACHINE:Nhost*} == ""
++.if defined(HOSTPROG) || "${DEP_MACHINE:Nhost*}" == ""
+ # we need to build this guy's dependencies for host as well.
+-.if ${DEP_MACHINE:Nhost*} == ""
++.if "${DEP_MACHINE:Nhost*}" == ""
+ _machines += ${DEP_MACHINE}
+ .else
+ _machines += host
+@@ -744,9 +744,9 @@ _build_all_dirs := ${_build_all_dirs:O:u}
+ # Normally if doing make -V something,
+ # we do not want to waste time chasing DIRDEPS
+ # but if we want to count the number of Makefile.depend* read, we do.
+-.if ${.MAKEFLAGS:M-V${_V_READ_DIRDEPS:U}} == ""
++.if "${.MAKEFLAGS:M-V${_V_READ_DIRDEPS:U}}" == ""
+ .if !empty(_build_all_dirs)
+-.if ${BUILD_DIRDEPS_CACHE} == "yes"
++.if "${BUILD_DIRDEPS_CACHE}" == "yes"
+ # we use _cache_script to minimize the number of times we fork the shell
+ _cache_script = echo '\# ${DEP_RELDIR}.${DEP_TARGET_SPEC}';
+ # guard against _new_dirdeps being too big for a single command line
+@@ -778,7 +778,7 @@ DEP_EXPORT_VARS =
+ 
+ # this builds the dependency graph
+ .for m in ${_machines}
+-.if ${BUILD_DIRDEPS_CACHE} == "yes" && !empty(_build_dirs)
++.if "${BUILD_DIRDEPS_CACHE}" == "yes" && !empty(_build_dirs)
+ _cache_deps =
+ _cache_script += echo; echo 'DIRDEPS.${_this_dir}.$m = \';
+ .endif
+@@ -786,10 +786,10 @@ _cache_script += echo; echo 'DIRDEPS.${_this_dir}.$m = \';
+ .if !empty(__qual_depdirs)
+ .for q in ${__qual_depdirs:M*.host*:${M_dep_qual_fixes.host:ts:}:E:O:u:N$m} \
+ 	${__qual_depdirs:N*.host*:${M_dep_qual_fixes:ts:}:E:O:u:N$m}
+-.if ${_debug_reldir} || ${DEBUG_DIRDEPS:@x@${${DEP_RELDIR}.$m:L:M$x}${${DEP_RELDIR}.$q:L:M$x}@} != ""
++.if ${_debug_reldir} || "${DEBUG_DIRDEPS:@x@${${DEP_RELDIR}.$m:L:M$x}${${DEP_RELDIR}.$q:L:M$x}@}" != ""
+ .info ${DEP_RELDIR}.$m: q=$q graph: ${_build_dirs:M*.$q:S,^${SRCTOP}/,,}
+ .endif
+-.if ${BUILD_DIRDEPS_CACHE} == "yes"
++.if "${BUILD_DIRDEPS_CACHE}" == "yes"
+ _cache_deps += ${_build_dirs:M*.$q:S,^${SRCTOP}/,,}
+ .else
+ ${_this_dir}.$m: ${_build_dirs:M*.$q}
+@@ -799,7 +799,7 @@ ${_this_dir}.$m: ${_build_dirs:M*.$q}
+ .if ${_debug_reldir}
+ .info ${DEP_RELDIR}.$m: graph: ${_build_dirs:M*.$m:N${_this_dir}.$m:S,^${SRCTOP}/,,}
+ .endif
+-.if ${BUILD_DIRDEPS_CACHE} == "yes"
++.if "${BUILD_DIRDEPS_CACHE}" == "yes"
+ .if !empty(_build_dirs)
+ _cache_deps += ${_build_dirs:M*.$m:N${_this_dir}.$m:S,^${SRCTOP}/,,}
+ .if !empty(_cache_deps)
+@@ -889,7 +889,7 @@ _DEP_RELDIR := ${RELDIR}
+ 
+ # skip _reldir_{finish,failed} if not included from Makefile.depend*
+ # or not in meta mode
+-.if !defined(WITHOUT_META_STATS) && ${.INCLUDEDFROMFILE:U:M${.MAKE.DEPENDFILE_PREFIX}*} != "" && ${.MAKE.MODE:Mmeta} != ""
++.if !defined(WITHOUT_META_STATS) && "${.INCLUDEDFROMFILE:U:M${.MAKE.DEPENDFILE_PREFIX}*}" != "" && "${.MAKE.MODE:Mmeta}" != ""
+ 
+ meta_stats= meta=${empty(.MAKE.META.FILES):?0:${.MAKE.META.FILES:[#]}} \
+ 	created=${empty(.MAKE.META.CREATED):?0:${.MAKE.META.CREATED:[#]}}
+diff --git a/share/mk/gendirdeps.mk b/share/mk/gendirdeps.mk
+index ec4e188cd..5da57a357 100644
+--- a/share/mk/gendirdeps.mk
++++ b/share/mk/gendirdeps.mk
+@@ -142,7 +142,7 @@ GENDIRDEPS_FILTER += ${GENDIRDEPS_FILTER_VARS:@v@S,/${$v}/,/_{${v}}/,@:NS,//,*:u
+ META2DEPS ?= ${.PARSEDIR}/meta2deps.sh
+ META2DEPS := ${META2DEPS}
+ 
+-.if ${DEBUG_GENDIRDEPS:Uno:@x@${RELDIR:M$x}@} != "" && ${DEBUG_GENDIRDEPS:Uno:Mmeta2d*} != ""
++.if "${DEBUG_GENDIRDEPS:Uno:@x@${RELDIR:M$x}@}" != "" && "${DEBUG_GENDIRDEPS:Uno:Mmeta2d*}" != ""
+ _time = time
+ _sh_x = sh -x
+ _py_d = -ddd
+@@ -152,15 +152,15 @@ _sh_x =
+ _py_d =
+ .endif
+ 
+-.if ${META2DEPS:E} == "py"
++.if "${META2DEPS:E}" == "py"
+ # we can afford to do this all the time.
+ DPDEPS ?= no
+ META2DEPS_CMD = ${_time} ${PYTHON} ${META2DEPS} ${_py_d}
+-.if ${DPDEPS:tl} != "no"
++.if "${DPDEPS:tl}" != "no"
+ META2DEPS_CMD += -D ${DPDEPS}
+ .endif
+ META2DEPS_FILTER = sed 's,^src:,${SRCTOP}/,;s,^\([^/]\),${OBJTOP}/\1,' |
+-.elif ${META2DEPS:E} == "sh"
++.elif "${META2DEPS:E}" == "sh"
+ META2DEPS_CMD = ${_time} ${_sh_x} ${META2DEPS} OBJTOP=${_OBJTOP}
+ .else
+ META2DEPS_CMD ?= ${META2DEPS}
+@@ -182,7 +182,7 @@ M2D_OBJROOTS += ${SB_OBJROOT}
+ .if defined(STAGE_ROOT)
+ M2D_OBJROOTS += ${STAGE_ROOT}
+ .endif
+-.if ${.MAKE.DEPENDFILE_PREFERENCE:U${.MAKE.DEPENDFILE}:M*.${MACHINE}} == ""
++.if "${.MAKE.DEPENDFILE_PREFERENCE:U${.MAKE.DEPENDFILE}:M*.${MACHINE}}" == ""
+ # meta2deps.py only groks objroot
+ # so we need to give it what it expects
+ # and tell it not to add machine qualifiers
+@@ -209,7 +209,7 @@ _objtop := ${_OBJTOP:tA}
+ _meta_files := ${META_FILES:N\*.meta:O:u}
+ # assume a big list
+ _meta_files_arg= @meta.list
+-.if empty(_meta_files) && ${META_FILES:M\*.meta} != ""
++.if empty(_meta_files) && "${META_FILES:M\*.meta}" != ""
+ # XXX this should be considered a bad idea,
+ # since we cannot ignore stale .meta
+ x != cd ${_OBJDIR} && find . -name '*.meta' -print -o \( -type d ! -name . -prune \) | sed 's,^./,,' > meta.list; echo
+@@ -232,7 +232,7 @@ dir_list != cd ${_OBJDIR} && \
+ 	${_meta_files_arg} | ${META2DEPS_FILTER} ${_skip_gendirdeps} \
+ 	sed ${GENDIRDEPS_SEDCMDS}
+ 
+-.if ${dir_list:M*ERROR\:*} != ""
++.if "${dir_list:M*ERROR\:*}" != ""
+ .warning ${dir_list:tW:C,.*(ERROR),\1,}
+ .warning Skipping ${_DEPENDFILE:S,${SRCTOP}/,,}
+ # we are not going to update anything
+@@ -256,7 +256,7 @@ dpadd_dir_list += ${f:H:tA}
+ ddeps != cat ${ddep_list:O:u} | ${META2DEPS_FILTER} ${_skip_gendirdeps} \
+ 	sed ${GENDIRDEPS_SEDCMDS}
+ 
+-.if ${DEBUG_GENDIRDEPS:Uno:@x@${RELDIR:M$x}@} != ""
++.if "${DEBUG_GENDIRDEPS:Uno:@x@${RELDIR:M$x}@}" != ""
+ .info ${RELDIR}: raw_dir_list='${dir_list}'
+ .info ${RELDIR}: ddeps='${ddeps}'
+ .endif
+@@ -290,7 +290,7 @@ skip_ql= ${SRCTOP}* ${_objtops:@o@$o*@}
+ # we need := so only skip_ql to this point applies
+ ql.$o := ${dir_list:${skip_ql:${M_ListToSkip}}:M$o*/*/*:C,$o([^/]+)/(.*),\2.\1,:S,.${HOST_TARGET},.host,}
+ qualdir_list += ${ql.$o}
+-.if ${DEBUG_GENDIRDEPS:Uno:@x@${RELDIR:M$x}@} != ""
++.if "${DEBUG_GENDIRDEPS:Uno:@x@${RELDIR:M$x}@}" != ""
+ .info ${RELDIR}: o=$o ${ql.$o qualdir_list:L:@v@$v=${$v}@}
+ .endif
+ skip_ql+= $o*
+@@ -319,7 +319,7 @@ DIRDEPS += \
+ GENDIRDEPS_FILTER_MASK += @CMNS
+ DIRDEPS := ${DIRDEPS:${GENDIRDEPS_FILTER:UNno:M[${GENDIRDEPS_FILTER_MASK:O:u:ts}]*:ts:}:C,//+,/,g:O:u}
+ 
+-.if ${DEBUG_GENDIRDEPS:Uno:@x@${RELDIR:M$x}@} != ""
++.if "${DEBUG_GENDIRDEPS:Uno:@x@${RELDIR:M$x}@}" != ""
+ .info ${RELDIR}: M2D_OBJROOTS=${M2D_OBJROOTS}
+ .info ${RELDIR}: M2D_EXCLUDES=${M2D_EXCLUDES}
+ .info ${RELDIR}: dir_list='${dir_list}'
+@@ -344,7 +344,7 @@ SRC_DIRDEPS := ${SRC_DIRDEPS:${GENDIRDEPS_SRC_FILTER:UN/*:ts:}:C,//+,/,g:O:u}
+ # if you want to capture SRC_DIRDEPS in .MAKE.DEPENDFILE put
+ # SRC_DIRDEPS_FILE = ${_DEPENDFILE}
+ # in local.gendirdeps.mk
+-.if ${SRC_DIRDEPS_FILE:Uno:tl} != "no"
++.if "${SRC_DIRDEPS_FILE:Uno:tl}" != "no"
+ ECHO_SRC_DIRDEPS = echo 'SRC_DIRDEPS = \'; echo '${SRC_DIRDEPS:@d@	$d \\${.newline}@}'; echo;
+ 
+ .if ${SRC_DIRDEPS_FILE:T} == ${_DEPENDFILE:T}
+diff --git a/share/mk/local.autodep.mk b/share/mk/local.autodep.mk
+index d3772aa2b..81349df92 100644
+--- a/share/mk/local.autodep.mk
++++ b/share/mk/local.autodep.mk
+@@ -1,5 +1,5 @@
+ 
+-.if ${.MAKE.DEPENDFILE:M*.${MACHINE}} == ""
++.if "${.MAKE.DEPENDFILE:M*.${MACHINE}}" == ""
+ # by default only MACHINE0 does updates
+ UPDATE_DEPENDFILE_MACHINE?= ${MACHINE0:U${MACHINE}}
+ .if ${MACHINE} != ${UPDATE_DEPENDFILE_MACHINE}
+diff --git a/share/mk/local.dirdeps.mk b/share/mk/local.dirdeps.mk
+index 7b4a1fdf4..c2ed44dca 100644
+--- a/share/mk/local.dirdeps.mk
++++ b/share/mk/local.dirdeps.mk
+@@ -27,7 +27,7 @@ DIRDEPS_FILTER.host = \
+ 	Nsecure/lib* \
+ 	Nusr.bin/xinstall* \
+ 
+-.if ${.MAKE.OS} == "FreeBSD"
++.if "${.MAKE.OS}" == "FreeBSD"
+ # Host libraries should mostly be excluded from the build so the
+ # host version in /usr/lib is used.
+ # Internal libraries need to be allowed to be built though
+@@ -42,7 +42,7 @@ _need_host_libs=
+ .for lib in ${_INTERNALLIBS}
+ _need_host_libs+= ${LIB${lib:tu}DIR:S,^${OBJTOP}/,,}
+ .endfor
+-.if ${MK_host_egacy} == "yes"
++.if "${MK_host_egacy}" == "yes"
+ _need_host_libs+= lib/libmd
+ .endif
+ 
+@@ -79,21 +79,21 @@ MK_host_egacy.host= ${MK_host_egacy}
+ 
+ # reset this each time
+ DIRDEPS_FILTER.xtras=
+-.if ${DEP_MACHINE:Npkgs*} != ""
++.if "${DEP_MACHINE:Npkgs*}" != ""
+ DIRDEPS_FILTER.xtras+= Nusr.bin/clang/clang.host
+ .endif
+ 
+-.if ${DEP_MACHINE:Nhost*} == ""
+-.if ${MK_host_egacy} == "yes" && ${DEP_RELDIR:Ntools/build:Ntargets/*:N*/stage} != ""
++.if "${DEP_MACHINE:Nhost*}" == ""
++.if "${MK_host_egacy}" == "yes" && "${DEP_RELDIR:Ntools/build:Ntargets/*:N*/stage}" != ""
+ DIRDEPS += tools/build
+ .endif
+ .else
+ MK_host_egacy.${DEP_MACHINE}= no
+ 
+ # this is how we can handle optional dependencies
+-.if ${DEP_RELDIR} == "lib/libc"
++.if "${DEP_RELDIR}" == "lib/libc"
+ DIRDEPS += lib/libc_nonshared
+-.if ${MK_SSP:Uno} != "no" 
++.if "${MK_SSP:Uno}" != "no" 
+ DIRDEPS += lib/libssp_nonshared
+ .endif
+ .else
+@@ -101,7 +101,7 @@ DIRDEPS_FILTER.xtras+= Nlib/libc_nonshared
+ .endif
+ 
+ # some optional things
+-.if ${MK_CTF} == "yes" && ${DEP_RELDIR:Mcddl/usr.bin/ctf*} == ""
++.if "${MK_CTF}" == "yes" && "${DEP_RELDIR:Mcddl/usr.bin/ctf*}" == ""
+ DIRDEPS += \
+ 	cddl/usr.bin/ctfconvert.host \
+ 	cddl/usr.bin/ctfmerge.host
+@@ -110,7 +110,7 @@ DIRDEPS += \
+ # Add in proper libgcc (gnu or LLVM) if not building libcc and libc is needed.
+ # Add both gcc_s and gcc_eh as dependencies as the decision to build
+ # -static or not is not known here.
+-.if ${DEP_RELDIR:M*libgcc*} == "" && ${DIRDEPS:U:Mlib/libc} != ""
++.if "${DEP_RELDIR:M*libgcc*}" == "" && "${DIRDEPS:U:Mlib/libc}" != ""
+ DIRDEPS+= \
+ 	lib/libgcc_eh \
+ 	lib/libgcc_s
+@@ -175,7 +175,7 @@ C_DIRDEPS= \
+ 
+ # libgcc is needed as well but is added later.
+ 
+-.if ${MK_GSSAPI} != "no"
++.if "${MK_GSSAPI}" != "no"
+ C_DIRDEPS+=  include/gssapi
+ .endif
+ 
+@@ -186,7 +186,7 @@ DIRDEPS+= ${C_DIRDEPS}
+ .if !empty(_SRCS:M*.cc) || !empty(_SRCS:M*.C) || !empty(_SRCS:M*.cpp) || \
+     !empty(_SRCS:M*.cxx)
+ DIRDEPS+= ${C_DIRDEPS}
+-.if ${MK_CLANG} == "yes"
++.if "${MK_CLANG}" == "yes"
+ DIRDEPS+= lib/libc++ lib/libcxxrt
+ .endif
+ # XXX: Clang and GCC always adds -lm currently, even when not needed.
+@@ -214,7 +214,7 @@ _ALL_LIBADD= ${LIBADD} ${_PROGS_LIBADD}
+ # Also handle LIBADD for non-internal libraries.
+ .for _lib in ${_ALL_LIBADD:O:u}
+ _lib${_lib}reldir= ${LIB${_lib:tu}DIR:C,${OBJTOP}/,,}
+-.if defined(LIB${_lib:tu}DIR) && ${DIRDEPS:M${_lib${_lib}reldir}} == "" && \
++.if defined(LIB${_lib:tu}DIR) && "${DIRDEPS:M${_lib${_lib}reldir}}" == "" && \
+     exists(${SRCTOP}/${_lib${_lib}reldir})
+ DIRDEPS+= ${_lib${_lib}reldir}
+ .endif
+@@ -225,9 +225,9 @@ DIRDEPS+= ${_lib${_lib}reldir}
+ 
+ .endif	# ${DEP_MACHINE} != "host"
+ 
+-.if ${MK_STAGING} == "yes"
++.if "${MK_STAGING}" == "yes"
+ # we need targets/pseudo/stage to prep the stage tree
+-.if ${DEP_RELDIR:N.:N${SRCTOP}:N*pseudo/stage} != ""
++.if "${DEP_RELDIR:N.:N${SRCTOP}:N*pseudo/stage}" != ""
+ DIRDEPS += targets/pseudo/stage
+ .endif
+ .endif
+diff --git a/share/mk/local.gendirdeps.mk b/share/mk/local.gendirdeps.mk
+index 5c417c0ac..64aab23c2 100644
+--- a/share/mk/local.gendirdeps.mk
++++ b/share/mk/local.gendirdeps.mk
+@@ -20,8 +20,8 @@ GENDIRDEPS_FILTER+= \
+ GENDIRDEPS_FILTER+= C,(lib/clang/lib[^/]*)/.*,\1,
+ 
+ # Exclude toolchain which is handled special.
+-.if ${RELDIR:Mtargets*} == ""
+-.if ${RELDIR:Nusr.bin/clang/*:Ngnu/usr.bin/cc/*:Nlib/clang*} != ""
++.if "${RELDIR:Mtargets*}" == ""
++.if "${RELDIR:Nusr.bin/clang/*:Ngnu/usr.bin/cc/*:Nlib/clang*}" != ""
+ GENDIRDEPS_FILTER.host+= \
+ 	Nusr.bin/clang/* \
+ 	Ngnu/usr.bin/cc/* \
+@@ -42,7 +42,7 @@ GENDIRDEPS_FILTER_HOST_TOOLS+= \
+ 	Ngnu/usr.bin/cc* \
+ 	Ngnu/usr.bin/binutils* \
+ 
+-.if ${MACHINE} != "host"
++.if "${MACHINE}" != "host"
+ GENDIRDEPS_FILTER+=	${GENDIRDEPS_FILTER_HOST_TOOLS:C,$,.host,}
+ .else
+ GENDIRDEPS_FILTER+=	${GENDIRDEPS_FILTER_HOST_TOOLS}
+diff --git a/share/mk/local.init.mk b/share/mk/local.init.mk
+index d9477fd22..314def665 100644
+--- a/share/mk/local.init.mk
++++ b/share/mk/local.init.mk
+@@ -2,9 +2,9 @@
+ .if !target(__${_this}__)
+ __${_this}__:
+ 
+-.if ${.MAKE.MODE:Mmeta*} != ""
+-.if !empty(SUBDIR) && !defined(LIB) && !defined(PROG) && ${.MAKE.MAKEFILES:M*bsd.prog.mk} == ""
+-.if ${.MAKE.MODE:Mleaf*} != ""
++.if "${.MAKE.MODE:Mmeta*}" != ""
++.if !empty(SUBDIR) && !defined(LIB) && !defined(PROG) && "${.MAKE.MAKEFILES:M*bsd.prog.mk}" == ""
++.if "${.MAKE.MODE:Mleaf*}" != ""
+ # we only want leaf dirs to build in meta mode... and we are not one
+ .MAKE.MODE = normal
+ .endif
+@@ -13,11 +13,11 @@ __${_this}__:
+ 
+ # XXX: This should be combined with external compiler support in Makefile.inc1
+ # and local.meta.sys.mk (CROSS_TARGET_FLAGS)
+-.if ${MK_SYSROOT} == "yes" && !empty(SYSROOT) && ${MACHINE} != "host"
++.if "${MK_SYSROOT}" == "yes" && !empty(SYSROOT) && "${MACHINE}" != "host"
+ CFLAGS_LAST+= --sysroot=${SYSROOT}
+ CXXFLAGS_LAST+= --sysroot=${SYSROOT}
+ LDADD+= --sysroot=${SYSROOT}
+-.elif ${MK_STAGING} == "yes"
++.elif "${MK_STAGING}" == "yes"
+ ISYSTEM?= ${STAGE_INCLUDEDIR}
+ # no space after -isystem makes it easier to
+ # grep the flag out of command lines (in meta files) to see its value.
+@@ -29,7 +29,7 @@ CFLAGS+= -isystem${ISYSTEM}
+ LDADD+= -L${STAGE_LIBDIR}
+ .endif
+ 
+-.if ${MACHINE} == "host"
++.if "${MACHINE}" == "host"
+ .if ${.MAKE.DEPENDFILE:E} != "host"
+ UPDATE_DEPENDFILE?= no
+ .endif
+diff --git a/share/mk/local.sys.mk b/share/mk/local.sys.mk
+index 2f684ba09..938b71acb 100644
+--- a/share/mk/local.sys.mk
++++ b/share/mk/local.sys.mk
+@@ -2,11 +2,11 @@
+ .if !target(_${_this}_)
+ _${_this}_: .NOTMAIN
+ 
+-.if ${MK_DIRDEPS_BUILD} == "yes" || ${MK_META_MODE} == "yes"
++.if "${MK_DIRDEPS_BUILD}" == "yes" || "${MK_META_MODE}" == "yes"
+ 
+ # Not in the below list as it may make sense for non-meta mode
+ # eventually.  meta.sys.mk (DIRDEPS_BUILD) also already adds these in.
+-.if ${MK_DIRDEPS_BUILD} == "no" && ${MK_META_MODE} == "yes"
++.if "${MK_DIRDEPS_BUILD}" == "no" && "${MK_META_MODE}" == "yes"
+ MAKE_PRINT_VAR_ON_ERROR += \
+ 	.ERROR_TARGET \
+ 	.ERROR_META_FILE \
+@@ -65,7 +65,7 @@ NPROC?= ${(type nproc || true) 2> /dev/null:L:sh:M/*:[1]}
+ NPROC:= ${NPROC}
+ .if !empty(NPROC)
+ ncpu!= ${NPROC}
+-.elif ${.MAKE.OS:NDarwin:NFreeBSD} == ""
++.elif "${.MAKE.OS:NDarwin:NFreeBSD}" == ""
+ ncpu!= sysctl -n hw.ncpu
+ .endif
+ .if ${ncpu:U0} > 1
+@@ -81,14 +81,14 @@ JOB_MAX:= ${jm:R}
+ # this will be set via local.meta.sys.env.mk if appropriate
+ MK_host_egacy?= no
+ 
+-.if ${.MAKE.MODE:Mmeta*} != ""
++.if "${.MAKE.MODE:Mmeta*}" != ""
+ # we can afford to use cookies to prevent some targets
+ # re-running needlessly but only when using filemon.
+ # Targets that should support the meta mode cookie handling should just be
+ # added to META_TARGETS.  If bsd.sys.mk cannot be included then ${META_DEPS}
+ # should be added as a target dependency as well.  Otherwise the target
+ # is added to in bsd.sys.mk since it comes last.
+-.if ${.MAKE.MODE:Mnofilemon} == ""
++.if "${.MAKE.MODE:Mnofilemon}" == ""
+ # Prepend .OBJDIR if not already there.
+ _META_COOKIE_COND=	"${.TARGET:M${.OBJDIR}/*}" == ""
+ _META_COOKIE_DEFAULT=	${${_META_COOKIE_COND}:?${.OBJDIR}/${.TARGET}:${.TARGET}}
+diff --git a/share/mk/meta.autodep.mk b/share/mk/meta.autodep.mk
+index cd08ac3b3..5dbef5be2 100644
+--- a/share/mk/meta.autodep.mk
++++ b/share/mk/meta.autodep.mk
+@@ -85,7 +85,7 @@ _bootstrap_dirdeps = yes
+ _bootstrap_dirdeps ?= no
+ UPDATE_DEPENDFILE ?= yes
+ 
+-.if ${DEBUG_AUTODEP:Uno:@m@${RELDIR:M$m}@} != ""
++.if "${DEBUG_AUTODEP:Uno:@m@${RELDIR:M$m}@}" != ""
+ .info ${_DEPENDFILE:S,${SRCTOP}/,,} update=${UPDATE_DEPENDFILE}
+ .endif
+ 
+@@ -98,22 +98,22 @@ META_XTRAS += ${XMAKE_META_FILE}
+ .endif
+ .endif
+ 
+-.if ${_bootstrap_dirdeps} == "yes" || exists(${_DEPENDFILE})
++.if "${_bootstrap_dirdeps}" == "yes" || exists(${_DEPENDFILE})
+ # if it isn't supposed to be touched by us the Makefile should have
+ # UPDATE_DEPENDFILE = no
+ WANT_UPDATE_DEPENDFILE ?= yes
+ .endif
+ 
+-.if ${WANT_UPDATE_DEPENDFILE:Uno:tl} != "no"
+-.if ${.MAKE.MODE:Uno:Mmeta*} == "" || ${.MAKE.MODE:Uno:M*read*} != ""
++.if "${WANT_UPDATE_DEPENDFILE:Uno:tl}" != "no"
++.if "${.MAKE.MODE:Uno:Mmeta*}" == "" || "${.MAKE.MODE:Uno:M*read*}" != ""
+ UPDATE_DEPENDFILE = no
+ .endif
+ 
+-.if ${DEBUG_AUTODEP:Uno:@m@${RELDIR:M$m}@} != ""
++.if "${DEBUG_AUTODEP:Uno:@m@${RELDIR:M$m}@}" != ""
+ .info ${_DEPENDFILE:S,${SRCTOP}/,,} update=${UPDATE_DEPENDFILE}
+ .endif
+ 
+-.if ${UPDATE_DEPENDFILE:tl} == "yes"
++.if "${UPDATE_DEPENDFILE:tl}" == "yes"
+ # sometimes we want .meta files generated to aid debugging/error detection
+ # but do not want to consider them for dependencies
+ # for example the result of running configure
+@@ -140,7 +140,7 @@ FORCE_DPADD += ${_nonlibs:@x@${DPADD:M*/$x}@}
+ .endif
+ 
+ # if we don't have OBJS, then .depend isn't useful
+-.if !target(.depend) && (!empty(OBJS) || ${.ALLTARGETS:M*.o} != "")
++.if !target(.depend) && (!empty(OBJS) || "${.ALLTARGETS:M*.o}" != "")
+ # some makefiles and/or targets contain
+ # circular dependencies if you dig too deep
+ # (as meta mode is apt to do)
+@@ -201,16 +201,16 @@ CAT_DEPEND = /dev/null
+ _depend =
+ .endif
+ 
+-.if ${DEBUG_AUTODEP:Uno:@m@${RELDIR:M$m}@} != ""
++.if "${DEBUG_AUTODEP:Uno:@m@${RELDIR:M$m}@}" != ""
+ .info ${_DEPENDFILE:S,${SRCTOP}/,,} _depend=${_depend}
+ .endif
+ 
+-.if ${UPDATE_DEPENDFILE} == "yes"
++.if "${UPDATE_DEPENDFILE}" == "yes"
+ gendirdeps:	${_DEPENDFILE}
+ .endif
+ 
+ .if !target(${_DEPENDFILE})
+-.if ${_bootstrap_dirdeps} == "yes"
++.if "${_bootstrap_dirdeps}" == "yes"
+ # We are boot-strapping a new directory
+ # Use DPADD to seed DIRDEPS
+ .if !empty(DPADD)
+@@ -249,7 +249,7 @@ _gendirdeps_mutex = ${GENDIRDEPS_MUTEXER} ${GENDIRDEPS_MUTEX:U${_CURDIR}/Makefil
+ 
+ .if make(gendirdeps)
+ META_FILES = *.meta
+-.elif ${OPTIMIZE_OBJECT_META_FILES:Uno:tl} == "no"
++.elif "${OPTIMIZE_OBJECT_META_FILES:Uno:tl}" == "no"
+ META_FILES = ${.MAKE.META.FILES:T:N.depend*:O:u}
+ .else
+ # if we have 1000's of .o.meta, ${PICO}.meta etc we need only look at one set
+@@ -258,12 +258,12 @@ META_FILES = ${.MAKE.META.FILES:T:N.depend*:N*o.meta:O:u} \
+ 	${.MAKE.META.FILES:T:M*.${.MAKE.META.FILES:M*o.meta:R:E:O:u:[1]}.meta:O:u}
+ .endif
+ 
+-.if ${DEBUG_AUTODEP:Uno:@m@${RELDIR:M$m}@} != ""
++.if "${DEBUG_AUTODEP:Uno:@m@${RELDIR:M$m}@}" != ""
+ .info ${_DEPENDFILE:S,${SRCTOP}/,,}: ${_depend} ${.PARSEDIR}/gendirdeps.mk ${META2DEPS} xtras=${META_XTRAS}
+ .endif
+ 
+ .if ${.MAKE.LEVEL} > 0
+-.if ${UPDATE_DEPENDFILE} == "yes"
++.if "${UPDATE_DEPENDFILE}" == "yes"
+ .-include <${.CURDIR}/${.MAKE.DEPENDFILE_PREFIX}.options>
+ .endif
+ .if !empty(GENDIRDEPS_FILTER)
+@@ -289,7 +289,7 @@ ${_DEPENDFILE}: ${_depend} ${.PARSEDIR}/gendirdeps.mk  ${META2DEPS} $${.MAKE.MET
+ .endif
+ .endif
+ 
+-.if ${_bootstrap_dirdeps} == "yes"
++.if "${_bootstrap_dirdeps}" == "yes"
+ DIRDEPS+= ${RELDIR}.${TARGET_SPEC:U${MACHINE}}
+ # make sure this is included at least once
+ .include <dirdeps.mk>
+diff --git a/share/mk/meta.stage.mk b/share/mk/meta.stage.mk
+index 168e46d22..e62672ec8 100644
+--- a/share/mk/meta.stage.mk
++++ b/share/mk/meta.stage.mk
+@@ -20,7 +20,7 @@
+ 
+ .-include <local.meta.stage.mk>
+ 
+-.if ${.MAKE.DEPENDFILE_PREFERENCE:U${.MAKE.DEPENDFILE}:M*.${MACHINE}} != ""
++.if "${.MAKE.DEPENDFILE_PREFERENCE:U${.MAKE.DEPENDFILE}:M*.${MACHINE}}" != ""
+ # this is generally safer anyway
+ _dirdep ?= ${RELDIR}.${TARGET_SPEC:U${MACHINE}}
+ .else
+@@ -36,7 +36,7 @@ CLEANFILES+= .dirdep
+ 	@echo '${_dirdep}' > $@
+ .endif
+ 
+-.if defined(NO_POSIX_SHELL) || ${type printf:L:sh:Mbuiltin} == ""
++.if defined(NO_POSIX_SHELL) || "${type printf:L:sh:Mbuiltin}" == ""
+ _stage_file_basename = `basename $$f`
+ _stage_target_dirname = `dirname $$t`
+ .else
+@@ -45,7 +45,7 @@ _stage_target_dirname = $${t%/*}
+ .endif
+ 
+ _OBJROOT ?= ${OBJROOT:U${OBJTOP:H}}
+-.if ${_OBJROOT:M*/} != ""
++.if "${_OBJROOT:M*/}" != ""
+ _objroot ?= ${_OBJROOT:tA}/
+ .else
+ _objroot ?= ${_OBJROOT:tA}
+@@ -71,7 +71,7 @@ LN_CP_SCRIPT = LnCp() { \
+ # a staging conflict should cause an error
+ # a warning is handy when bootstapping different options.
+ STAGE_CONFLICT?= ERROR
+-.if ${STAGE_CONFLICT:tl} == "error"
++.if "${STAGE_CONFLICT:tl}" == "error"
+ STAGE_CONFLICT_ACTION= exit 1
+ .else
+ STAGE_CONFLICT_ACTION=
+@@ -205,7 +205,7 @@ STAGE_TARGETS += stage_files
+ STAGE_FILES.$s ?= ${.ALLSRC:N.dirdep:Nstage_*}
+ .if !target(.stage_files.$s)
+ .stage_files.$s:
+-.if $s != "_default"
++.if "$s" != "_default"
+ stage_files:	stage_files.$s
+ stage_files.$s:	.dirdep
+ .else
+@@ -225,7 +225,7 @@ STAGE_LINKS_DIR.$s ?= ${STAGE_OBJTOP}
+ STAGE_TARGETS += stage_links
+ .if !target(.stage_links.$s)
+ .stage_links.$s:
+-.if $s != "_default"
++.if "$s" != "_default"
+ stage_links:	stage_links.$s
+ stage_links.$s:	.dirdep
+ .else
+@@ -244,7 +244,7 @@ STAGE_SYMLINKS_DIR.$s ?= ${STAGE_OBJTOP}
+ STAGE_TARGETS += stage_symlinks
+ .if !target(.stage_symlinks.$s)
+ .stage_symlinks.$s:
+-.if $s != "_default"
++.if "$s" != "_default"
+ stage_symlinks:	stage_symlinks.$s
+ stage_symlinks.$s:	.dirdep
+ .else
+@@ -313,7 +313,7 @@ __${.PARSEFILE}__: .NOTMAIN
+ # for non-jobs mode the order here matters
+ staging: ${STAGE_TARGETS:N*_links} ${STAGE_TARGETS:M*_links}
+ 
+-.if ${.MAKE.JOBS:U0} > 0 && ${STAGE_TARGETS:U:M*_links} != ""
++.if ${.MAKE.JOBS:U0} > 0 && "${STAGE_TARGETS:U:M*_links}" != ""
+ # the above isn't sufficient
+ .for t in ${STAGE_TARGETS:N*links:O:u}
+ .ORDER: $t stage_links
+@@ -333,7 +333,7 @@ STAGE_INSTALL := sh ${.PARSEDIR:tA}/stage-install.sh INSTALL="${INSTALL}" OBJDIR
+ .endif
+ 
+ # if ${INSTALL} gets run during 'all' assume it is for staging?
+-.if ${.TARGETS:Nall} == "" && defined(STAGE_INSTALL)
++.if "${.TARGETS:Nall}" == "" && defined(STAGE_INSTALL)
+ INSTALL := ${STAGE_INSTALL}
+ .if target(beforeinstall)
+ beforeinstall: .dirdep
+@@ -348,7 +348,7 @@ ${STAGE_TARGETS}:
+ .NOPATH: ${CLEANFILES}
+ 
+ MK_STALE_STAGED?= no
+-.if ${MK_STALE_STAGED} == "yes"
++.if "${MK_STALE_STAGED}" == "yes"
+ all: stale_staged
+ # get a list of paths that we have just staged
+ # get a list of paths that we have previously staged to those same dirs
+diff --git a/share/mk/meta.sys.mk b/share/mk/meta.sys.mk
+index ba213dd49..f3d989260 100644
+--- a/share/mk/meta.sys.mk
++++ b/share/mk/meta.sys.mk
+@@ -44,13 +44,13 @@ _filemon := ${.MAKE.PATH_FILEMON:U/dev/filemon}
+ 
+ .if empty(UPDATE_DEPENDFILE)
+ _make_mode := ${.MAKE.MODE} ${META_MODE}
+-.if ${_make_mode:M*read*} != "" || ${_make_mode:M*nofilemon*} != ""
++.if "${_make_mode:M*read*}" != "" || "${_make_mode:M*nofilemon*}" != ""
+ # tell everyone we are not updating Makefile.depend*
+ UPDATE_DEPENDFILE = NO
+ .export UPDATE_DEPENDFILE
+ .endif
+-.if ${_filemon:T:Mfilemon} == "filemon"
+-.if ${UPDATE_DEPENDFILE:Uyes:tl} == "no" && !exists(${_filemon})
++.if "${_filemon:T:Mfilemon}" == "filemon"
++.if "${UPDATE_DEPENDFILE:Uyes:tl}" == "no" && !exists(${_filemon})
+ # we should not get upset
+ META_MODE += nofilemon
+ .export META_MODE
+@@ -67,7 +67,7 @@ META_MODE += silent=yes
+ .endif
+ .endif
+ 
+-.if ${MK_DIRDEPS_BUILD:Uno} == "yes"
++.if "${MK_DIRDEPS_BUILD:Uno}" == "yes"
+ 
+ .if !defined(META2DEPS)
+ .if defined(PYTHON) && exists(${PYTHON})
+@@ -90,7 +90,7 @@ MAKE_PRINT_VAR_ON_ERROR += \
+ MK_META_ERROR_TARGET = yes
+ .endif
+ 
+-.if ${MK_META_ERROR_TARGET:Uno} == "yes"
++.if "${MK_META_ERROR_TARGET:Uno}" == "yes"
+ 
+ .if !defined(SB) && defined(SRCTOP)
+ SB = ${SRCTOP:H}
+@@ -111,7 +111,7 @@ _metaError: .NOMETA .NOTMAIN
+ .endif
+ 
+ # Are we, after all, in meta mode?
+-.if ${.MAKE.MODE:Uno:Mmeta*} != ""
++.if "${.MAKE.MODE:Uno:Mmeta*}" != ""
+ MKDEP_MK ?= meta.autodep.mk
+ 
+ # we can afford to use cookies to prevent some targets
+@@ -130,13 +130,13 @@ META_NOECHO= :
+ 	${SYS_MK_DIR} \
+ 
+ 
+-.if ${UPDATE_DEPENDFILE:Uyes:tl} != "no"
+-.if ${.MAKEFLAGS:Uno:M-k} != ""
++.if "${UPDATE_DEPENDFILE:Uyes:tl}" != "no"
++.if "${.MAKEFLAGS:Uno:M-k}" != ""
+ # make this more obvious
+ .warning Setting UPDATE_DEPENDFILE=NO due to -k
+ UPDATE_DEPENDFILE= NO
+ .export UPDATE_DEPENDFILE
+-.elif ${_filemon:T} == "filemon" && !exists(${_filemon})
++.elif "${_filemon:T}" == "filemon" && !exists(${_filemon})
+ .error ${.newline}ERROR: The filemon module (${_filemon}) is not loaded.
+ .endif
+ .endif
+diff --git a/share/mk/src.init.mk b/share/mk/src.init.mk
+index 580f9c9c8..cae97f9f5 100644
+--- a/share/mk/src.init.mk
++++ b/share/mk/src.init.mk
+@@ -7,7 +7,7 @@ buildenv: .PHONY
+ 	${_+_}@env BUILDENV_DIR=${.CURDIR} ${MAKE} -C ${SRCTOP} buildenv
+ .endif
+ 
+-.if ${MACHINE:Nhost*} == ""
++.if "${MACHINE:Nhost*}" == ""
+ .if ${.MAKE.OS} != "FreeBSD"
+ # these won't work anyway - see tools/build/mk/Makefile.boot.pre
+ MK_DEBUG_FILES= no
+@@ -25,14 +25,14 @@ CFLAGS+= \
+ 
+ .endif
+ 
+-.if ${MK_host_egacy} == "yes"
++.if "${MK_host_egacy}" == "yes"
+ .ifdef PROG
+ LOCAL_LIBRARIES+= egacy
+ LIBADD+= egacy
+ .endif
+ .endif
+ 
+-.if ${MK_STAGING} == "yes"
++.if "${MK_STAGING}" == "yes"
+ ISYSTEM=	/usr/include
+ CFLAGS+=	-I${STAGE_INCLUDEDIR}
+ .endif
+diff --git a/share/mk/src.libnames.mk b/share/mk/src.libnames.mk
+index 6a79d0b86..bb2541f98 100644
+--- a/share/mk/src.libnames.mk
++++ b/share/mk/src.libnames.mk
+@@ -228,13 +228,13 @@ _LIBRARIES=	\
+ 		zpool \
+ 		zutil
+ 
+-.if ${MK_BLACKLIST} != "no"
++.if "${MK_BLACKLIST}" != "no"
+ _LIBRARIES+= \
+ 		blacklist \
+ 
+ .endif
+ 
+-.if ${MK_OFED} != "no"
++.if "${MK_OFED}" != "no"
+ _LIBRARIES+= \
+ 		cxgb4 \
+ 		ibcm \
+@@ -251,7 +251,7 @@ _LIBRARIES+= \
+ 		osmvendor
+ .endif
+ 
+-.if ${MK_BEARSSL} == "yes"
++.if "${MK_BEARSSL}" == "yes"
+ _LIBRARIES+= \
+ 		bearssl \
+ 		secureboot \
+@@ -260,7 +260,7 @@ LIBBEARSSL?=	${LIBBEARSSLDIR}/libbearssl.a
+ LIBSECUREBOOT?=	${LIBSECUREBOOTDIR}/libsecureboot.a
+ .endif
+ 
+-.if ${MK_VERIEXEC} == "yes"
++.if "${MK_VERIEXEC}" == "yes"
+ _LIBRARIES+= veriexec
+ 
+ LIBVERIEXEC?=	${LIBVERIEXECDIR}/libveriexec.a
+@@ -270,13 +270,13 @@ LIBVERIEXEC?=	${LIBVERIEXECDIR}/libveriexec.a
+ # 2nd+ order consumers.  Auto-generating this would be better.
+ _DP_80211=	sbuf bsdxml
+ _DP_9p=		sbuf
+-.if ${MK_CASPER} != "no"
++.if "${MK_CASPER}" != "no"
+ _DP_9p+=	casper cap_pwd cap_grp
+ .endif
+ 
+ # XXX: Not bootstrapped so uses host version on non-FreeBSD, so don't use a
+ # FreeBSD-specific dependency list
+-.if ${.MAKE.OS} == "FreeBSD" || !defined(BOOTSTRAPPING)
++.if "${.MAKE.OS}" == "FreeBSD" || !defined(BOOTSTRAPPING)
+ _DP_archive=	z bz2 lzma bsdxml zstd
+ .endif
+ _DP_avl=	spl
+@@ -287,8 +287,8 @@ _DP_blacklist+=	pthread
+ .endif
+ _DP_crypto=	pthread
+ # See comment by _DP_archive above
+-.if ${.MAKE.OS} == "FreeBSD" || !defined(BOOTSTRAPPING)
+-.if ${MK_OPENSSL} != "no"
++.if "${.MAKE.OS}" == "FreeBSD" || !defined(BOOTSTRAPPING)
++.if "${MK_OPENSSL}" != "no"
+ _DP_archive+=	crypto
+ .else
+ _DP_archive+=	md
+@@ -297,11 +297,11 @@ _DP_archive+=	md
+ _DP_sqlite3=	pthread
+ _DP_ssl=	crypto
+ _DP_ssh=	crypto crypt z
+-.if ${MK_LDNS} != "no"
++.if "${MK_LDNS}" != "no"
+ _DP_ssh+=	ldns
+ .endif
+ _DP_edit=	tinfow
+-.if ${MK_OPENSSL} != "no"
++.if "${MK_OPENSSL}" != "no"
+ _DP_bsnmp=	crypto
+ .endif
+ _DP_geom=	bsdxml sbuf
+@@ -314,14 +314,14 @@ _DP_cap_grp=	nv
+ _DP_cap_pwd=	nv
+ _DP_cap_sysctl=	nv
+ _DP_cap_syslog=	nv
+-.if ${MK_OFED} != "no"
++.if "${MK_OFED}" != "no"
+ _DP_pcap=	ibverbs mlx5
+ .endif
+ _DP_pjdlog=	util
+ _DP_usb=	pthread
+ _DP_unbound=	ssl crypto pthread
+ _DP_rt=	pthread
+-.if ${MK_OPENSSL} == "no"
++.if "${MK_OPENSSL}" == "no"
+ _DP_radius=	md
+ .else
+ _DP_radius=	crypto
+@@ -329,7 +329,7 @@ _DP_radius=	crypto
+ _DP_rtld_db=	elf procstat
+ _DP_procstat=	kvm util elf
+ _DP_proc=	cxxrt
+-.if ${MK_CDDL} != "no"
++.if "${MK_CDDL}" != "no"
+ _DP_proc+=	ctf
+ .endif
+ _DP_proc+=	elf procstat rtld_db util z
+@@ -340,7 +340,7 @@ _DP_mt=		sbuf bsdxml
+ _DP_ldns=	ssl crypto
+ _DP_lua=	m
+ _DP_lutok=	lua
+-.if ${MK_OPENSSL} != "no"
++.if "${MK_OPENSSL}" != "no"
+ _DP_fetch=	ssl crypto
+ .else
+ _DP_fetch=	md
+@@ -357,14 +357,14 @@ _DP_gmock_main=	gmock
+ _DP_gtest_main=	gtest
+ _DP_devstat=	kvm
+ _DP_pam=	radius tacplus md util
+-.if ${MK_KERBEROS} != "no"
++.if "${MK_KERBEROS}" != "no"
+ _DP_pam+=	krb5
+ .endif
+-.if ${MK_OPENSSH} != "no"
++.if "${MK_OPENSSH}" != "no"
+ _DP_fido2+=	crypto z
+ _DP_pam+=	ssh
+ .endif
+-.if ${MK_NIS} != "no"
++.if "${MK_NIS}" != "no"
+ _DP_pam+=	ypclnt
+ .endif
+ _DP_roken=	crypt
+@@ -395,8 +395,8 @@ _DP_ztest=	geom m nvpair umem zpool pthread avl zfs_core spl zutil zfs uutil icp
+ _DP_c=		compiler_rt
+ # Use libssp_nonshared only on i386 and power*.  Other archs emit direct calls
+ # to __stack_chk_fail, not __stack_chk_fail_local provided by libssp_nonshared.
+-.if ${MK_SSP} != "no" && \
+-    (${MACHINE_ARCH} == "i386" || ${MACHINE_ARCH:Mpower*} != "")
++.if "${MK_SSP}" != "no" && \
++    ("${MACHINE_ARCH}" == "i386" || "${MACHINE_ARCH:Mpower*}" != "")
+ _DP_c+=		ssp_nonshared
+ .endif
+ _DP_stats=	sbuf pthread
+@@ -425,7 +425,7 @@ _DP_ifconfig=	m
+ _DP_pfctl=	nv
+ 
+ # OFED support
+-.if ${MK_OFED} != "no"
++.if "${MK_OFED}" != "no"
+ _DP_cxgb4=	ibverbs pthread
+ _DP_ibcm=	ibverbs
+ _DP_ibmad=	ibumad
+@@ -461,7 +461,7 @@ LDADD_gtest_main= -lprivategtest_main
+ LIB${_l:tu}?=	${LIBDESTDIR}${LIBDIR_BASE}/libprivate${_l}.a
+ .endfor
+ 
+-.if ${MK_PIE} != "no"
++.if "${MK_PIE}" != "no"
+ PIE_SUFFIX=	_pie
+ .endif
+ 
+@@ -482,8 +482,8 @@ LDADD_${_l}?=	${LDADD_${_l}_L} -l${_l}
+ # NO_SHARED back to yes despite only building static versions of bootstrap
+ # libraries (see tools/build/mk/Makefile.boot.pre).
+ .if defined(_DP_${_l}) && (${_INTERNALLIBS:M${_l}} || \
+-    (defined(NO_SHARED) && ${NO_SHARED:tl} != "no") || \
+-    (defined(BOOTSTRAPPING) && ${.MAKE.OS} != "FreeBSD"))
++    (defined(NO_SHARED) && "${NO_SHARED:tl}" != "no") || \
++    (defined(BOOTSTRAPPING) && "${.MAKE.OS}" != "FreeBSD"))
+ .for _d in ${_DP_${_l}}
+ DPADD_${_l}+=	${DPADD_${_d}}
+ LDADD_${_l}+=	${LDADD_${_d}}
+@@ -775,7 +775,7 @@ _BADLIBADD+= ${_l}
+ .endif
+ 
+ # Sanity check that libraries are defined here properly when building them.
+-.if defined(LIB) && ${_LIBRARIES:M${LIB}} != ""
++.if defined(LIB) && "${_LIBRARIES:M${LIB}}" != ""
+ .if !empty(LIBADD) && \
+     (!defined(_DP_${LIB}) || ${LIBADD:O:u} != ${_DP_${LIB}:O:u})
+ .error ${.CURDIR}: Missing or incorrect _DP_${LIB} entry in ${_this:T}.  Should match LIBADD for ${LIB} ('${LIBADD}' vs '${_DP_${LIB}}')
+@@ -785,7 +785,7 @@ _BADLIBADD+= ${_l}
+ .if !defined(LIB${LIB:tu}DIR) || !exists(${SRCTOP}/${LIB${LIB:tu}DIR:S,^${OBJTOP}/,,})
+ .error ${.CURDIR}: Missing or incorrect value for LIB${LIB:tu}DIR in ${_this:T}: ${LIB${LIB:tu}DIR:S,^${OBJTOP}/,,}
+ .endif
+-.if ${_INTERNALLIBS:M${LIB}} != "" && !defined(LIB${LIB:tu})
++.if "${_INTERNALLIBS:M${LIB}}" != "" && !defined(LIB${LIB:tu})
+ .error ${.CURDIR}: Missing value for LIB${LIB:tu} in ${_this:T}.  Likely should be: LIB${LIB:tu}?= $${LIB${LIB:tu}DIR}/lib${LIB}.a
+ .endif
+ .endif
+diff --git a/share/mk/src.opts.mk b/share/mk/src.opts.mk
+index dd88772fc..5bfe79214 100644
+--- a/share/mk/src.opts.mk
++++ b/share/mk/src.opts.mk
+@@ -273,7 +273,7 @@ __LLVM_TARGET_FILT=	C/(amd64|i386)/x86/:C/powerpc.*/powerpc/:C/armv[67]/arm/:C/r
+ .if ${__T:${__LLVM_TARGET_FILT}} == ${__llt}
+ __DEFAULT_YES_OPTIONS+=	LLVM_TARGET_${__llt:${__LLVM_TARGET_FILT}:tu}
+ # aarch64 needs arm for -m32 support.
+-.elif ${__T} == "aarch64" && ${__llt:Marm*} != ""
++.elif "${__T}" == "aarch64" && "${__llt:Marm*}" != ""
+ __DEFAULT_DEPENDENT_OPTIONS+=	LLVM_TARGET_ARM/LLVM_TARGET_AARCH64
+ # Default the rest of the LLVM_TARGETs to the value of MK_LLVM_TARGET_ALL.
+ .else
+@@ -285,37 +285,37 @@ __DEFAULT_NO_OPTIONS+=LLVM_TARGET_BPF LLVM_TARGET_MIPS
+ 
+ .include <bsd.compiler.mk>
+ 
+-.if ${__T} == "i386" || ${__T} == "amd64"
++.if "${__T}" == "i386" || "${__T}" == "amd64"
+ __DEFAULT_NO_OPTIONS += FDT
+ .else
+ __DEFAULT_YES_OPTIONS += FDT
+ .endif
+ 
+-.if ${__T:Marm*} == "" && ${__T:Mriscv64*} == ""
++.if "${__T:Marm*}" == "" && "${__T:Mriscv64*}" == ""
+ __DEFAULT_YES_OPTIONS+=LLDB
+ .else
+ __DEFAULT_NO_OPTIONS+=LLDB
+ .endif
+ # LIB32 is not supported on all 64-bit architectures.
+-.if (${__T} == "amd64" || ${__T:Maarch64*} != "" || ${__T} == "powerpc64")
++.if ("${__T}" == "amd64" || "${__T:Maarch64*}" != "" || "${__T}" == "powerpc64")
+ __DEFAULT_YES_OPTIONS+=LIB32
+ .else
+ BROKEN_OPTIONS+=LIB32
+ .endif
+ # EFI doesn't exist on powerpc (well, officially) and doesn't work on i386
+-.if ${__T:Mpowerpc*} || ${__T} == "i386"
++.if ${__T:Mpowerpc*} || "${__T}" == "i386"
+ BROKEN_OPTIONS+=EFI
+ .endif
+ # OFW is only for powerpc, exclude others
+-.if ${__T:Mpowerpc*} == ""
++.if "${__T:Mpowerpc*}" == ""
+ BROKEN_OPTIONS+=LOADER_OFW
+ .endif
+ # KBOOT is only for powerpc64 (powerpc64le broken) amd64 and aarch64
+-.if ${__T} != "powerpc64" && ${__T} != "amd64" && ${__T} != "aarch64"
++.if "${__T}" != "powerpc64" && "${__T}" != "amd64" && "${__T}" != "aarch64"
+ BROKEN_OPTIONS+=LOADER_KBOOT
+ .endif
+ # UBOOT is only for arm, and big-endian powerpc
+-.if (${__T:Marm*} == "" && ${__T:Mpowerpc*} == "") || ${__T} == "powerpc64le"
++.if ("${__T:Marm*}" == "" && "${__T:Mpowerpc*}" == "") || "${__T}" == "powerpc64le"
+ BROKEN_OPTIONS+=LOADER_UBOOT
+ .endif
+ # GELI and Lua in loader currently cause boot failures on powerpc.
+@@ -327,42 +327,42 @@ BROKEN_OPTIONS+=LOADER_GELI LOADER_LUA
+ .endif
+ 
+ # Kernel TLS is enabled by default on amd64, aarch64 and powerpc64*
+-.if ${__T} == "aarch64" || ${__T} == "amd64" || ${__T:Mpowerpc64*} != ""
++.if "${__T}" == "aarch64" || "${__T}" == "amd64" || "${__T:Mpowerpc64*}" != ""
+ __DEFAULT_YES_OPTIONS+=OPENSSL_KTLS
+ .else
+ __DEFAULT_NO_OPTIONS+=OPENSSL_KTLS
+ .endif
+ 
+-.if ${__T} != "aarch64" && ${__T} != "amd64" && ${__T} != "i386" && \
+-    ${__T:Mpowerpc64*} == ""
++.if "${__T}" != "aarch64" && "${__T}" != "amd64" && "${__T}" != "i386" && \
++    "${__T:Mpowerpc64*}" == ""
+ BROKEN_OPTIONS+=CXGBETOOL
+ BROKEN_OPTIONS+=MLX5TOOL
+ .endif
+ 
+-.if ${__T} != "amd64" && ${__T} != "i386" && ${__T} != "aarch64"
++.if "${__T}" != "amd64" && "${__T}" != "i386" && "${__T}" != "aarch64"
+ BROKEN_OPTIONS+=HYPERV
+ .endif
+ 
+ # NVME is only aarch64, x86 and powerpc64*
+-.if ${__T} != "aarch64" && ${__T} != "amd64" && ${__T} != "i386" && \
+-    ${__T:Mpowerpc64*} == ""
++.if "${__T}" != "aarch64" && "${__T}" != "amd64" && "${__T}" != "i386" && \
++    "${__T:Mpowerpc64*}" == ""
+ BROKEN_OPTIONS+=NVME
+ .endif
+ 
+-.if ${__T} == "aarch64" || ${__T} == "amd64" || ${__T} == "i386" || \
+-    ${__T:Mpowerpc64*} != "" || ${__T:Mriscv64*} != ""
++.if "${__T}" == "aarch64" || "${__T}" == "amd64" || "${__T}" == "i386" || \
++    "${__T:Mpowerpc64*}" != "" || "${__T:Mriscv64*}" != ""
+ __DEFAULT_YES_OPTIONS+=OPENMP
+ .else
+ __DEFAULT_NO_OPTIONS+=OPENMP
+ .endif
+ 
+ # Broken on 32-bit arm, kernel module compile errors
+-.if ${__T:Marm*} != ""
++.if "${__T:Marm*}" != ""
+ BROKEN_OPTIONS+= OFED
+ .endif
+ 
+ # MK_host_egacy is set by local.sys.mk so is valid here
+-.if ${MACHINE} == "host" && ${MK_host_egacy} == "yes"
++.if "${MACHINE}" == "host" && "${MK_host_egacy}" == "yes"
+ # we cannot expect tests to work
+ BROKEN_OPTIONS+= TESTS
+ .endif
+@@ -375,52 +375,52 @@ BROKEN_OPTIONS+= TESTS
+ # Force some options off if their dependencies are off.
+ # Order is somewhat important.
+ #
+-.if ${MK_CAPSICUM} == "no"
++.if "${MK_CAPSICUM}" == "no"
+ MK_CASPER:=	no
+ .endif
+ 
+-.if ${MK_SOURCELESS} == "no"
++.if "${MK_SOURCELESS}" == "no"
+ MK_SOURCELESS_HOST:=	no
+ MK_SOURCELESS_UCODE:= no
+ .endif
+ 
+-.if ${MK_CDDL} == "no"
++.if "${MK_CDDL}" == "no"
+ MK_CTF:=	no
+ MK_DTRACE:=	no
+ MK_LOADER_ZFS:=	no
+ MK_ZFS:=	no
+ .endif
+ 
+-.if ${MK_CRYPT} == "no"
++.if "${MK_CRYPT}" == "no"
+ MK_OPENSSL:=	no
+ MK_OPENSSH:=	no
+ MK_KERBEROS:=	no
+ MK_KERBEROS_SUPPORT:=	no
+ .endif
+ 
+-.if ${MK_DIALOG} == "no"
++.if "${MK_DIALOG}" == "no"
+ MK_BSDINSTALL:=	no
+ .endif
+ 
+-.if ${MK_DTRACE} == "no"
++.if "${MK_DTRACE}" == "no"
+ MK_CTF:=	no
+ .endif
+ 
+-.if ${MK_MAIL} == "no"
++.if "${MK_MAIL}" == "no"
+ MK_MAILWRAPPER:= no
+ MK_SENDMAIL:=	no
+ MK_DMAGENT:=	no
+ .endif
+ 
+-.if ${MK_NETGRAPH} == "no"
++.if "${MK_NETGRAPH}" == "no"
+ MK_BLUETOOTH:=	no
+ .endif
+ 
+-.if ${MK_NLS} == "no"
++.if "${MK_NLS}" == "no"
+ MK_NLS_CATALOGS:= no
+ .endif
+ 
+-.if ${MK_OPENSSL} == "no"
++.if "${MK_OPENSSL}" == "no"
+ MK_DMAGENT:=	no
+ MK_OPENSSH:=	no
+ MK_OPENSSL_KTLS:=	no
+@@ -432,64 +432,64 @@ MK_LOADER_ZFS:=	no
+ MK_ZFS:=	no
+ .endif
+ 
+-.if ${MK_LDNS} == "no"
++.if "${MK_LDNS}" == "no"
+ MK_LDNS_UTILS:=	no
+ MK_UNBOUND:= no
+ .endif
+ 
+-.if ${MK_PF} == "no"
++.if "${MK_PF}" == "no"
+ MK_AUTHPF:=	no
+ .endif
+ 
+-.if ${MK_OFED} == "no"
++.if "${MK_OFED}" == "no"
+ MK_OFED_EXTRA:=	no
+ .endif
+ 
+-.if ${MK_TESTS} == "no"
++.if "${MK_TESTS}" == "no"
+ MK_DTRACE_TESTS:= no
+ .endif
+ 
+-.if ${MK_TESTS_SUPPORT} == "no"
++.if "${MK_TESTS_SUPPORT}" == "no"
+ MK_GOOGLETEST:=	no
+ .endif
+ 
+-.if ${MK_ZONEINFO} == "no"
++.if "${MK_ZONEINFO}" == "no"
+ MK_ZONEINFO_LEAPSECONDS_SUPPORT:= no
+ .endif
+ 
+-.if ${MK_CROSS_COMPILER} == "no"
++.if "${MK_CROSS_COMPILER}" == "no"
+ MK_CLANG_BOOTSTRAP:= no
+ MK_ELFTOOLCHAIN_BOOTSTRAP:= no
+ MK_LLD_BOOTSTRAP:= no
+ .endif
+ 
+-.if ${MK_TOOLCHAIN} == "no"
++.if "${MK_TOOLCHAIN}" == "no"
+ MK_CLANG:=	no
+ MK_LLD:=	no
+ MK_LLDB:=	no
+ MK_LLVM_BINUTILS:=	no
+ .endif
+ 
+-.if ${MK_CLANG} == "no"
++.if "${MK_CLANG}" == "no"
+ MK_CLANG_EXTRAS:= no
+ MK_CLANG_FORMAT:= no
+ MK_CLANG_FULL:= no
+ MK_LLVM_COV:= no
+ .endif
+ 
+-.if ${MK_ASAN} == "yes"
++.if "${MK_ASAN}" == "yes"
+ # In order to get sensible backtraces from ASAN we have to install
+ # llvm-symbolizer as /usr/bin/addr2line instead of the elftoolchain version.
+ MK_LLVM_BINUTILS:=	yes
+ .endif
+ 
+-.if ${MK_LLVM_BINUTILS} == "yes"
++.if "${MK_LLVM_BINUTILS}" == "yes"
+ # MK_LLVM_CXXFILT is a subset of MK_LLVM_BINUTILS and should therefore be
+ # enabled if MK_LLVM_BINUTILS is set.
+ MK_LLVM_CXXFILT:=	yes
+ .endif
+ 
+-.if ${MK_LOADER_VERIEXEC} == "no"
++.if "${MK_LOADER_VERIEXEC}" == "no"
+ MK_LOADER_VERIEXEC_PASS_MANIFEST := no
+ .endif
+ 
+diff --git a/share/mk/src.sys.env.mk b/share/mk/src.sys.env.mk
+index 634606c0e..40922a056 100644
+--- a/share/mk/src.sys.env.mk
++++ b/share/mk/src.sys.env.mk
+@@ -78,10 +78,10 @@ MK_META_MODE=	no
+ # If we were found via .../share/mk we need to replace that
+ # with ${.PARSEDIR:tA} so that we can be found by
+ # sub-makes launched from objdir.
+-.if ${.MAKEFLAGS:M.../share/mk} != ""
++.if "${.MAKEFLAGS:M.../share/mk}" != ""
+ .MAKEFLAGS:= ${.MAKEFLAGS:S,.../share/mk,${.PARSEDIR:tA},}
+ .endif
+-.if ${MAKESYSPATH:Uno:M*.../*} != ""
++.if "${MAKESYSPATH:Uno:M*.../*}" != ""
+ MAKESYSPATH:= ${MAKESYSPATH:S,.../share/mk,${.PARSEDIR:tA},}
+ .export MAKESYSPATH
+ .elif empty(MAKESYSPATH)
+@@ -89,7 +89,7 @@ MAKESYSPATH:=	${.PARSEDIR:tA}
+ .export MAKESYSPATH
+ .endif
+ 
+-.if ${RELDIR:U} == "." && ${.MAKE.LEVEL} == 0
++.if "${RELDIR:U}" == "." && ${.MAKE.LEVEL} == 0
+ .-include "${.CURDIR}/Makefile.sys.inc"
+ .endif
+ .include <src.sys.obj.mk>
+diff --git a/share/mk/src.sys.obj.mk b/share/mk/src.sys.obj.mk
+index 708559edc..14698e987 100644
+--- a/share/mk/src.sys.obj.mk
++++ b/share/mk/src.sys.obj.mk
+@@ -24,6 +24,7 @@
+ #  by the current user.  Some top-level targets disable this behavior in
+ #  Makefile.sys.inc.
+ #
++#  Fixed Malformed conditional errors using this guide: https://wiki.netbsd.org/tutorials/bsd_make/
+ 
+ _default_makeobjdirprefix?=	/usr/obj
+ _default_makeobjdir=	$${.CURDIR:S,^$${SRCTOP},$${OBJTOP},}
+@@ -31,7 +32,7 @@ _default_makeobjdir=	$${.CURDIR:S,^$${SRCTOP},$${OBJTOP},}
+ .include <bsd.mkopt.mk>
+ 
+ .if ${.MAKE.LEVEL} == 0 || empty(OBJROOT)
+-.if ${MK_UNIFIED_OBJDIR} == "no" && ${MK_DIRDEPS_BUILD} == "no"
++.if "${MK_UNIFIED_OBJDIR}" == "no" && "${MK_DIRDEPS_BUILD}" == "no"
+ # Fall back to historical behavior.
+ # We always want to set a default MAKEOBJDIRPREFIX...
+ MAKEOBJDIRPREFIX?=	${_default_makeobjdirprefix}
+@@ -66,7 +67,7 @@ SB_OBJROOT?=	${SB}/obj/
+ OBJROOT?=	${SB_OBJROOT}
+ .endif
+ OBJROOT?=	${_default_makeobjdirprefix}${SRCTOP}/
+-.if ${OBJROOT:M*/} != ""
++.if "${OBJROOT:M*/}" != ""
+ OBJROOT:=	${OBJROOT:H:tA}/
+ .else
+ OBJROOT:=	${OBJROOT:H:tA}/${OBJROOT:T}
+@@ -75,12 +76,12 @@ OBJROOT:=	${OBJROOT:H:tA}/${OBJROOT:T}
+ .export OBJROOT SRCTOP
+ .endif
+ 
+-.if ${MK_DIRDEPS_BUILD} == "no"
++.if "${MK_DIRDEPS_BUILD}" == "no"
+ .if empty(OBJTOP)
+ # SRCTOP == OBJROOT only happens with clever MAKEOBJDIRPREFIX=/.  Don't
+ # append TARGET.TARGET_ARCH for that case since the user wants to build
+ # in the source tree.
+-.if ${MK_UNIFIED_OBJDIR} == "yes" && ${SRCTOP} != ${OBJROOT:tA}
++.if "${MK_UNIFIED_OBJDIR}" == "yes" && "${SRCTOP}" != "${OBJROOT:tA}"
+ .if defined(TARGET) && defined(TARGET_ARCH)
+ OBJTOP:=	${OBJROOT}${TARGET}.${TARGET_ARCH}
+ .elif defined(TARGET) && ${.CURDIR} == ${SRCTOP}
+@@ -107,7 +108,7 @@ OBJROOT:=	${OBJTOP}/
+ 
+ # Wait to validate MAKEOBJDIR until OBJTOP is set.
+ .if defined(MAKEOBJDIR)
+-.if ${MAKEOBJDIR:M/*} == ""
++.if "${MAKEOBJDIR:M/*}" == ""
+ .error Cannot use MAKEOBJDIR=${MAKEOBJDIR}${.newline}Unset MAKEOBJDIR to get default:  MAKEOBJDIR='${_default_makeobjdir}'
+ .endif
+ .endif
+@@ -115,7 +116,7 @@ OBJROOT:=	${OBJTOP}/
+ # __objdir is the expected .OBJDIR we want to use and that auto.obj.mk will
+ # try to create.
+ .if !empty(MAKEOBJDIRPREFIX)
+-.if ${.CURDIR:M${MAKEOBJDIRPREFIX}/*} != ""
++.if "${.CURDIR:M${MAKEOBJDIRPREFIX}/*}" != ""
+ # we are already in obj tree!
+ __objdir=	${.CURDIR}
+ .else
+@@ -129,7 +130,7 @@ __objdir:=	${MAKEOBJDIR}
+ # do this if AUTO_OBJ is not disabled by the user, and this is the first make
+ # ran.
+ .if ${.MAKE.LEVEL} == 0 && \
+-    ${MK_AUTO_OBJ} == "no" && empty(.MAKEOVERRIDES:MMK_AUTO_OBJ) && \
++    "${MK_AUTO_OBJ}" == "no" && empty(.MAKEOVERRIDES:MMK_AUTO_OBJ) && \
+     !defined(WITHOUT_AUTO_OBJ) && !make(showconfig) && !make(print-dir) && \
+     !make(test-system-*) && \
+     !defined(NO_OBJ) && \
+@@ -209,7 +210,7 @@ MK_AUTO_OBJ:=	${__objdir_writable}
+ .endif
+ 
+ # Ensure .OBJDIR=.CURDIR cases have a proper OBJTOP and .OBJDIR
+-.if defined(NO_OBJ) || ${__objdir_writable:Uunknown} == "no" || \
++.if defined(NO_OBJ) || "${__objdir_writable:Uunknown}" == "no" || \
+     ${__objdir} == ${.CURDIR}
+ OBJTOP=		${SRCTOP}
+ OBJROOT=	${SRCTOP}/
+diff --git a/share/mk/sys.dependfile.mk b/share/mk/sys.dependfile.mk
+index 49232646d..b406922ed 100644
+--- a/share/mk/sys.dependfile.mk
++++ b/share/mk/sys.dependfile.mk
+@@ -29,7 +29,7 @@ __${.PARSEFILE}__: .NOTMAIN
+ .MAKE.DEPENDFILE_PREFIX ?= Makefile.depend
+ 
+ .if !empty(.MAKE.DEPENDFILE) && \
+-	${.MAKE.DEPENDFILE:M${.MAKE.DEPENDFILE_PREFIX}*} == ""
++	"${.MAKE.DEPENDFILE:M${.MAKE.DEPENDFILE_PREFIX}*}" == ""
+ # let us do our thing below...
+ .undef .MAKE.DEPENDFILE
+ .endif
+@@ -47,7 +47,7 @@ __${.PARSEFILE}__: .NOTMAIN
+ _e := ${.MAKE.DEPENDFILE_PREFERENCE:@m@${exists($m):?$m:}@}
+ .if !empty(_e)
+ .MAKE.DEPENDFILE := ${_e:[1]}
+-.elif ${.MAKE.DEPENDFILE_PREFERENCE:M*${MACHINE}} != "" && ${.MAKE.DEPENDFILE_DEFAULT:E} != ${MACHINE}
++.elif "${.MAKE.DEPENDFILE_PREFERENCE:M*${MACHINE}}" != "" && ${.MAKE.DEPENDFILE_DEFAULT:E} != ${MACHINE}
+ # MACHINE specific depend files are supported, but *not* default.
+ # If any already exist, we should follow suit.
+ _aml = ${ALL_MACHINE_LIST:Uarm amd64 i386 powerpc:N${MACHINE}} ${MACHINE}
+diff --git a/share/mk/sys.dirdeps.mk b/share/mk/sys.dirdeps.mk
+index a3d22d7c2..05e40a45e 100644
+--- a/share/mk/sys.dirdeps.mk
++++ b/share/mk/sys.dirdeps.mk
+@@ -56,7 +56,7 @@ OBJROOT := ${SB_OBJROOT:U${MAKEOBJDIRPREFIX:U${SB}/obj}/}
+ .export OBJROOT
+ .endif
+ # we expect OBJROOT to end with / (- can work too)
+-.if ${OBJROOT:M*[/-]} == ""
++.if "${OBJROOT:M*[/-]}" == ""
+ OBJROOT := ${OBJROOT}/
+ .endif
+ 
+@@ -71,7 +71,7 @@ STAGE_ROOT ?= ${OBJROOT}stage
+ # TARGET_SPEC must not contain any '.'s.
+ TARGET_SPEC_VARS ?= MACHINE
+ 
+-.if ${TARGET_SPEC:Uno:M*,*} != ""
++.if "${TARGET_SPEC:Uno:M*,*}" != ""
+ # deal with TARGET_SPEC from env
+ _tspec := ${TARGET_SPEC:S/,/ /g}
+ .for i in ${TARGET_SPEC_VARS:${M_RANGE:Urange}}
+@@ -91,7 +91,7 @@ TARGET_SPEC=
+ 
+ # Now make sure we know what TARGET_SPEC is
+ # as we may need it to find Makefile.depend*
+-.if ${MACHINE:Mhost*} != ""
++.if "${MACHINE:Mhost*}" != ""
+ # host is special
+ TARGET_SPEC = ${MACHINE}
+ .else
+@@ -124,9 +124,9 @@ MACHINE_OBJ.${MACHINE} ?= ${TARGET_OBJ_SPEC}
+ MACHINE_OBJDIR = ${MACHINE_OBJ.${MACHINE}}
+ 
+ # we likely want to override env for OBJTOP
+-.if ${MACHINE} == "host"
++.if "${MACHINE}" == "host"
+ OBJTOP = ${HOST_OBJTOP}
+-.elif ${MACHINE} == "host32"
++.elif "${MACHINE}" == "host32"
+ OBJTOP = ${HOST_OBJTOP32}
+ .else
+ OBJTOP = ${OBJROOT}${MACHINE_OBJDIR}
+@@ -138,7 +138,7 @@ OBJTOP = ${OBJROOT}${MACHINE_OBJDIR}
+ .export OBJTOP
+ .endif
+ 
+-.if ${MAKEOBJDIR:U:M*/*} == ""
++.if "${MAKEOBJDIR:U:M*/*}" == ""
+ # we do not use MAKEOBJDIRPREFIX
+ # though we may have used it above to initialize OBJROOT
+ .undef MAKEOBJDIRPREFIX
+@@ -163,7 +163,7 @@ TIME_STAMP_FMT ?= @ %s [%Y-%m-%d %T] ${:U}
+ DATE_TIME_STAMP ?= `date '+${TIME_STAMP_FMT}'`
+ TIME_STAMP ?= ${TIME_STAMP_FMT:localtime}
+ 
+-.if ${MK_TIME_STAMPS:Uyes} == "yes"
++.if "${MK_TIME_STAMPS:Uyes}" == "yes"
+ TRACER = ${TIME_STAMP}
+ ECHO_DIR = echo ${TIME_STAMP}
+ ECHO_TRACE = echo ${TIME_STAMP}
+@@ -187,7 +187,7 @@ RELSRCTOP?= ${RELTOP}
+ .-include <local.sys.dirdeps.mk>
+ 
+ # check if we got anything sane
+-.if ${.MAKE.DEPENDFILE} == ".depend"
++.if "${.MAKE.DEPENDFILE}" == ".depend"
+ .undef .MAKE.DEPENDFILE
+ .endif
+ # just in case
+diff --git a/tools/build/Makefile b/tools/build/Makefile
+index 8ad104f90..90f3563a3 100644
+--- a/tools/build/Makefile
++++ b/tools/build/Makefile
+@@ -20,11 +20,11 @@ RPCINCSDIR=	${INCLUDEDIR}/rpc
+ BOOTSTRAPPING?=	0
+ 
+ 
+-.if ${.MAKE.OS} == "Darwin"
++.if "${.MAKE.OS}" == "Darwin"
+ _XCODE_ROOT!=xcode-select -p
+ # since macOS 10.14 C headers are no longer installed in /usr but only
+ # provided via the SDK
+-.if ${_XCODE_ROOT} == "/Library/Developer/CommandLineTools"
++.if "${_XCODE_ROOT}" == "/Library/Developer/CommandLineTools"
+ # Only command line tools installed -> host headers are in the SDKs directory
+ _MACOS_SDK_DIR=${_XCODE_ROOT}/SDKs/MacOSX.sdk/
+ .else
+@@ -124,12 +124,12 @@ CHACHA20INCSDIR=	${INCLUDEDIR}/crypto/chacha20
+ CHACHA20INCS+=	${SRCTOP}/sys/crypto/chacha20/_chacha.h \
+ 	${SRCTOP}/sys/crypto/chacha20/chacha.h
+ 
+-.if ${MACHINE} == "host"
++.if "${MACHINE}" == "host"
+ _host_arch= ${_HOST_ARCH}
+ .else
+ _host_arch=${MACHINE}
+ .endif
+-.if ${_host_arch} == "x86_64"
++.if "${_host_arch}" == "x86_64"
+ # bmake on Linux/mac often prints that instead of amd64
+ _host_arch=amd64
+ .elif ${_host_arch} == "aarch64"
+@@ -138,12 +138,12 @@ _host_arch=arm64
+ .elif ${_host_arch:Mppc*}
+ _host_arch=powerpc
+ .endif
+-.if ${_host_arch} == "unknown"
++.if "${_host_arch}" == "unknown"
+ # HACK: If MACHINE is unknown, assume we are building on x86
+ _host_arch=amd64
+ .endif
+ MACHINESYSINCS+=	${SRCTOP}/sys/${_host_arch}/include/elf.h
+-.if ${_host_arch} == "amd64" || ${_host_arch} == "i386"
++.if "${_host_arch}" == "amd64" || "${_host_arch}" == "i386"
+ INCSGROUPS+=	X86INCS
+ X86INCSDIR=	${INCLUDEDIR}/x86
+ X86INCS+=	${SRCTOP}/sys/x86/include/elf.h
+@@ -163,7 +163,7 @@ SYSINCS+=	${SRCTOP}/sys/sys/nlist_aout.h
+ INCS+=	${SRCTOP}/include/bitstring.h
+ SYSINCS+=	${SRCTOP}/sys/sys/bitstring.h
+ 
+-.if ${.MAKE.OS} != "FreeBSD"
++.if "${.MAKE.OS}" != "FreeBSD"
+ .PATH: ${.CURDIR}/cross-build
+ 
+ # Needed by our sys/types.h wrapper
+@@ -193,7 +193,7 @@ SRCS+=	strtonum.c merge.c heapsort.c reallocf.c
+ .PATH: ${LIBC_SRCTOP}/locale
+ SRCS+=	rpmatch.c
+ 
+-.if ${.MAKE.OS} == "Linux"
++.if "${.MAKE.OS}" == "Linux"
+ # On Linux, glibc does not provide strlcpy,strlcat or strmode.
+ .PATH: ${LIBC_SRCTOP}/string
+ SRCS+=	strlcpy.c strlcat.c strmode.c
+@@ -210,7 +210,7 @@ SRCS+=	fflags.c
+ 
+ .endif # ${MAKE.OS} == "Linux"
+ 
+-.if ${.MAKE.OS} == "Darwin"
++.if "${.MAKE.OS}" == "Darwin"
+ # Standalone implementation of secure_getenv(), not available on MacOS.
+ SRCS+=	secure_getenv.c
+ .endif # ${MAKE.OS} == "Darwin"
+@@ -315,7 +315,7 @@ _host_abs_tools_to_symlink=	${_make_abs}:make ${_make_abs}:bmake
+ 
+ _LINK_HOST_TOOL=	ln -sfn
+ 
+-.if ${.MAKE.OS} == "FreeBSD"
++.if "${.MAKE.OS}" == "FreeBSD"
+ # When building on FreeBSD we always copy the host tools instead of linking
+ # into WORLDTMP to avoid issues with incompatible libraries (see r364030).
+ # Note: we could create links if we don't intend to update the current machine.
+@@ -327,7 +327,7 @@ _COPY_HOST_TOOL=	cp -pf
+ # there are ACLs on shared volumes.
+ _COPY_HOST_TOOL=	${_LINK_HOST_TOOL}
+ 
+-.if ${.MAKE.OS} == "Darwin"
++.if "${.MAKE.OS}" == "Darwin"
+ # /usr/bin/cpp may invoke xcrun:
+ _host_tools_to_symlink+=	xcrun
+ .endif  # ${.MAKE.OS} == "Darwin"
+@@ -348,7 +348,7 @@ _host_tools_to_symlink:=	${_host_tools_to_symlink:Nsh}
+ # Remove this hack and just use a symlink once Clang 13 can be assumed.
+ # For consistency, we use the same strategy for LD.
+ .include <bsd.compiler.mk>
+-.if ${.MAKE.OS} == "FreeBSD" && ${COMPILER_TYPE} == "clang" && \
++.if "${.MAKE.OS}" == "FreeBSD" && "${COMPILER_TYPE}" == "clang" && \
+     ${COMPILER_VERSION} < 130000
+ _WRAP_HOST_TOOL=	sh -c "printf '\#!/bin/sh\nexec \"\%s\" \"\$$@\"\n' \"\$$0\" > \"\$$1\" && chmod +x \"\$$1\""
+ .else
+diff --git a/tools/build/mk/Makefile.boot b/tools/build/mk/Makefile.boot
+index 9f63a7499..35f114aee 100644
+--- a/tools/build/mk/Makefile.boot
++++ b/tools/build/mk/Makefile.boot
+@@ -45,13 +45,13 @@ CWARNFLAGS.clang+=-Werror=incompatible-pointer-types-discards-qualifiers
+ # TODO: only needed for uuencode and uudecode
+ LDADD+=-lresolv
+ 
+-.if ${.MAKE.OS} == "Linux"
++.if "${.MAKE.OS}" == "Linux"
+ CFLAGS+=	-I${SRCTOP}/tools/build/cross-build/include/linux
+ CFLAGS+=	-D_GNU_SOURCE=1
+ # Needed for sem_init, etc. on Linux (used by usr.bin/sort)
+ LDADD+=	-pthread
+ 
+-.elif ${.MAKE.OS} == "Darwin"
++.elif "${.MAKE.OS}" == "Darwin"
+ CFLAGS+=	-D_DARWIN_C_SOURCE=1
+ CFLAGS+=	-I${SRCTOP}/tools/build/cross-build/include/mac
+ # The macOS ar and ranlib don't understand all the flags supported by the
+@@ -67,7 +67,7 @@ CFLAGS+=	-idirafter ${SRCTOP}/contrib/libarchive/libarchive
+ .endif
+ .endif # ${.MAKE.OS} != "FreeBSD"
+ 
+-.if ${.MAKE.OS} != "FreeBSD"
++.if "${.MAKE.OS}" != "FreeBSD"
+ # Add the common compatibility headers after the OS-specific ones.
+ CFLAGS+=	-I${SRCTOP}/tools/build/cross-build/include/common
+ .endif
+diff --git a/tools/build/mk/Makefile.boot.pre b/tools/build/mk/Makefile.boot.pre
+index afad8d17b..62312b268 100644
+--- a/tools/build/mk/Makefile.boot.pre
++++ b/tools/build/mk/Makefile.boot.pre
+@@ -1,6 +1,6 @@
+ 
+ # Various MK_* options need to be set before including bsd.prog.mk/bsd.lib.mk
+-.if ${.MAKE.OS} != "FreeBSD"
++.if "${.MAKE.OS}" != "FreeBSD"
+ # Most Linux distributions don't ship the .a files for static linking.
+ # And on macOS it is impossible to create a statically linked binary.
+ NO_SHARED:=	no
+-- 
+2.46.0
+

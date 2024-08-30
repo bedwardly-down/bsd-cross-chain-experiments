@@ -216,6 +216,8 @@ jobs:
           include:
             - stage: sysroot
               platform: freebsd
+              shared: shared
+              musl: v1.2.5
 
     - name: Prepare ${{ matrix.stage }} Matrix
       id: build
@@ -691,7 +693,7 @@ jobs:
   sysroot:
     name: Prepare FreeBSD Sysroot
     runs-on: ubuntu-22.04
-    needs: [define, matrix]
+    needs: [define, matrix, deps]
 
     strategy:
       matrix: ${{ fromJSON(needs.matrix.outputs.matrix_sysroot) }}
@@ -733,6 +735,9 @@ jobs:
         echo "sysroot_dir_${{ matrix.platform }}_$VERSION=${{ env.SYSROOT_DIR }}" >> "$GITHUB_OUTPUT"
         echo 'sysroot_dir=${{ env.SYSROOT_DIR }}' >> "$GITHUB_OUTPUT"
 
+        echo 'shared_dir=${{ needs.deps.outputs.deps_dir_shared }}' >> "$GITHUB_OUTPUT"
+        echo 'shared_key=${{ needs.deps.outputs.deps_key_shared }}' >> "$GITHUB_OUTPUT"
+
     - name: Prepare ${{ matrix.platform }} Sysroot
       id: key
       env:
@@ -767,8 +772,6 @@ jobs:
         # Need this to decompress archive
         sudo apt-get install -y lzma
 
-        # Clean up packages due to needing space for next step
-        sudo apt-get clean -y
         sudo find / -type d -name "docker" -prune -exec rm -rf '{}' \+
         sudo find / -type d -name "dotnet" -prune -exec rm -rf '{}' \+
         sudo find / -type d -name "ghc" -prune -exec rm -rf '{}' \+
@@ -778,13 +781,86 @@ jobs:
         sudo find / -type d -name "microsoft" -prune -exec rm -rf '{}' \+
         sudo find / -type d -name "$AGENT_TOOLSDIRECTORY" -prune -exec rm -rf '{}' \+
         sudo find /usr/local -type d -name "boost" -prune -exec rm -rf '{}' \;
-
+        
         source $TLD/${{ env.BSD_DEPS_SCRIPT }}
-
+        
         echo "bsd_thirdparty_deps=$BSD_THIRDPARTY_DEPS" >> "$GITHUB_OUTPUT"
+        
+    - name: Load ${{ matrix.shared }} Dependencies Cache
+      id: shared
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ steps.define.outputs.shared_dir }}
+        key: |
+          ${{ steps.define.outputs.shared_key }}
 
-    # Uses https://github.com/ClickHouse/sysroot/tree/master/freebsd-x86_64 as a guide for minimal sysroot
-    - name: Create FreeBSD Sysroot
+    - name: Prepare Apt Sources
+      id: apt
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+        export DEPS_DIR="${{ steps.define.outputs.shared_dir }}"
+
+        bash $TLD/${{ env.DEPS_AFT }}
+
+    - name: Install ${{ matrix.shared }} Dependencies
+      id: install
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        sudo apt-get update
+        sudo apt-get install -y wget
+
+        rm -rf $TLD/${{ steps.define.outputs.shared_dir }}
+
+    - name: Checkout ${{ matrix.platform }} ${{ matrix.version }} source
+      id: source
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        path: 'freebsd'
+        repository: 'freebsd/freebsd-src'
+        ref: 'releng/${{ matrix.version }}'
+
+    - name: Prepare Bmake Build Tools
+      id: bmake
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        cd $TLD/freebsd/contrib
+        rm -rf bmake
+        
+        # grab the latest bmake version
+        wget -c http://www.crufty.net/ftp/pub/sjg/bmake.tar.gz
+        wget -c http://www.crufty.net/ftp/pub/sjg/mk.tar.gz
+
+        tar xf bmake.tar.gz
+        rm -rf bmake.tar.gz
+
+        cd bmake
+        tar xf ../mk.tar.gz
+        rm -rf ../mk.tar.gz
+
+        cd $TLD/freebsd
+
+        cp -rf $TLD/cross/build/freebsd/sysroot/Makefile.inc1 .
+        cp -rf $TLD/cross/build/freebsd/sysroot/mk/* ./share/mk
+        cp -rf $TLD/cross/build/freebsd/sysroot/tools/* ./tools/build
+        patch -p1 -i $TLD/cross/patches/freebsd/Bemake-build-fix.patch
+
+        cd $TLD
+
+    - name: Build ${{ matrix.platform }} ${{ matrix.version }} Sysroot
       id: sysroot
       if: |
         steps.load.outputs.cache-hit != 'true'
@@ -796,66 +872,83 @@ jobs:
           ${{ matrix.version }}
         run: |
           export TLD=$GITHUB_WORKSPACE
+          export MAKEOBJDIRPREFIX=$TLD/builder
+          export PREFIX_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
 
-          fetch https://download.freebsd.org/releases/amd64/amd64/${{ matrix.version }}-RELEASE/base.txz
-          mkdir -pv $TLD/${{ steps.define.outputs.sysroot_dir }} $TLD/builder
-          cd $TLD/builder
-          tar xf $TLD/base.txz
+          export SYSROOT_DIR=$PREFIX_DIR
+          export SYSROOT_BIN="$PREFIX_DIR/bin"
+          export SYSROOT_INC="$PREFIX_DIR/include"
+          export SYSROOT_MK="$PREFIX_DIR/share/mk"
+
+          #export CFLAGS="-target x86_64-linux-gnu"
+          #export CXXFLAGS="-target x86_64-linux-gnu"
+
+          export LLVM_INSTALL_DIR=/usr/local/llvm${{ env.CLANG_VERSION }}
+          export CC=$LLVM_INSTALL_DIR/bin/clang
+          export CXX=$LLVM_INSTALL_DIR/bin/clang++
+          export CPP=$LLVM_INSTALL_DIR/bin/clang-cpp
+          export NM=$LLVM_INSTALL_DIR/bin/llvm-nm
+          export RANLIB=$LLVM_INSTALL_DIR/bin/llvm-ranlib
+          export STRIP=$LLVM_INSTALL_DIR/bin/llvm-strip
+          export AR=$LLVM_INSTALL_DIR/bin/llvm-ar
+          export LD=$LLVM_INSTALL_DIR/bin/ld.lld
+
+          export XCC=$CC
+          export XCXX=$CXX
+          export XCPP=$CPP
+          export XLD=$LD
+
+          export TARGETS="TARGET=amd64 TARGET_ARCH=amd64"
+          
+          mkdir -pv $PREFIX_DIR $MAKEOBJDIRPREFIX
 
           pkg bootstrap -f -y
           pkg update
           
-          # Gran the required compiler and toolchain
-          pkg install -y llvm${{ env.CLANG_VERSION }} gcc${{ env.GCC_VERSION }} 
+          # Grab the required compiler and toolchain
+          pkg install -y llvm${{ env.CLANG_VERSION }} gcc${{ env.GCC_VERSION }} python311
+          
+          # As recommended here: https://wiki.freebsd.org/BuildingFreeBSDWithClang#Quickstart
+          echo "MK_WERROR=no" | tee -a /etc/make.conf
+          echo "NO_FSCHG=" | tee -a /etc/make.conf
 
-          # Copy toolchain to sysroot
-          cd $TLD/${{ steps.define.outputs.sysroot_dir }}
-          cp -rf /usr/local/llvm${{ env.CLANG_VERSION }}/* .
-          mv -v /usr/local/lib/gcc${{ env.GCC_VERSION }}/include/* include
-          rm -rf /usr/local/lib/gcc${{ env.GCC_VERSION }}/gcc
-          find $TLD/builder/usr/lib -type f -name "*crt*.o" -prune -exec mv -v '{}' lib \;
-          find /usr/local/lib/gcc${{ env.GCC_VERSION }} -type f -name "lib*" -prune -exec mv -v '{}' lib \;
-
-          ## Remove excess files from sysroot
-          #chflags -R noschg .
-          #pkg -c . clean -ay
-          #find . -type f -name "*.pkg*" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "boot" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "dev" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "proc" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "etc" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "tmp" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "src" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "tests" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "icons" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "etc" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "nls" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "locales" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "fonts" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "root" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "restore" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "rescue" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "html" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "doc" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "man" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "*bin" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "db" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "sendmail" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "empty" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "cache" -prune -exec rm -rf '{}' \+
-          #find . -type d -name "logs" -prune -exec rm -rf '{}' \+
-          #find . -type f -name "*.gz" -prune -exec rm -rf '{}' \+
-          #find . -type f -name "*.bz2" -prune -exec rm -rf '{}' \+
-          #find . -type f -name "*.xz" -prune -exec rm -rf '{}' \+
-          #find . -type f -name "*.html" -prune -exec rm -rf '{}' \;
-          #rm -rf sys media mnt
-          #
+          # Prepare bootstrapping
+          cd $TLD/freebsd/contrib/bmake
+          sh mk/install-mk ./mk
+          sh boot-strap \
+            --with-default-sys-path=.../share/mk:$SYSROOT_MK \
+            --without-filemon \
+            --prefix=$PREFIX_DIR \
+            op=install
+          
           ## Prepare sysroot for usage
-          cd $TLD
-          rm -rf builder base.tar.xz
+          cd $TLD/freebsd
+          $SYSROOT_BIN/bmake $TARGETS \
+            -j $(nproc) \
+            toolchain
 
-          tar c ${{ env.SYSROOT_DIR }} | xz -9 > freebsd.tar.xz
-          rm -rf ${{ env.SYSROOT_DIR }}
+          $SYSROOT_BIN/bmake $TARGETS \
+            -j $(nproc) \
+            buildworld
+
+          export DESTDIR=$MAKEOBJDIRPREFIX
+          $SYSROOT_BIN/bmake $TARGETS \
+            -j $(nproc) \
+            installworld
+
+          $SYSROOT_BIN/bmake $TARGETS \
+            -j $(nproc) \
+            xdev-build
+
+          $SYSROOT_BIN/bmake $TARGETS \
+            -j $(nproc) \
+            xdev-install \
+            DESTDIR=$PREFIX_DIR
+          
+          cd $TLD
+
+          tar c $SYSROOT_DIR | xz -9 > freebsd.tar.xz
+          rm -rf $SYSROOT_DIR $TLD/freebsd $MAKEOBJDIRPREFIX
 
     # FreeBSD Vm Rsync hack; it doesn't copy over all files unless I compress and then decompress here
     - name: Prepare FreeBSD Sysroot Cache
@@ -1375,19 +1468,18 @@ jobs:
         cd $TLD/${{ env.SOURCE_DIR }}
 
         if [[ "${{ matrix.platform }}" == "freebsd" ]]; then
-          export SYSROOT="--sysroot=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/"
-          export INCLUDES="-I$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/include -I$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/include/c++/v1"
-          export LDFLAGS="$LDFLAGS -Wl,-rpath=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/lib/gcc${{ env.GCC_VERSION }} -Wl,-rpath=$TLD/${{ steps.platform.outputs.sysroot_dir }}/use/local/lib -Wl,-rpath=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/llvm${{ env.CLANG_VERSION }}/lib"
+          #export SYSROOT="--sysroot=$TLD/${{ steps.platform.outputs.sysroot_dir }}"
+          export INCLUDES="-I$TLD/${{ steps.platform.outputs.sysroot_dir }}/include -I$TLD/${{ steps.platform.outputs.sysroot_dir }}/include/c++/v1"
+          export LDFLAGS="$LDFLAGS -Wl,-rpath=$TLD/${{ steps.platform.outputs.sysroot_dir }}/lib"
           export CFLAGS="$CFLAGS -target ${{ steps.platform.outputs.cross_host }} $SYSROOT $INCLUDES"
           export CXXFLAGS="$CXXFLAGS -target ${{ steps.platform.outputs.cross_host }} $SYSROOT $INCLUDES -stdlib=libc++"
-          #export LIBRARY_PATH=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/llvm${{ env.CLANG_VERSION }}/lib:$LIBRARY_PATH
+          export LIBRARY_PATH=$TLD/${{ steps.platform.outputs.sysroot_dir }}/lib:$LIBRARY_PATH
 
-          # Do this to set up the cross-compilation things to work properly
-          # These are not detected properly by clang; symlinking is the easiest way to fix it
-          find $TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/lib -type f -name "*crt*.o" -prune -exec ln -sv '{}' . \;
-          find $TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/lib -type f -name "libgcc*" -prune -exec ln -sv '{}' . \;
+          find $TLD/${{ steps.platform.outputs.sysroot_dir }}/lib -type f -name "*crt*.o" -prune -exec ln -sv '{}' . \;
+          find $TLD/${{ steps.platform.outputs.sysroot_dir }}/lib -type f -name "libgcc*" -prune -exec ln -sv '{}' . \;
+          find $TLD/${{ steps.platform.outputs.sysroot_dir }}/lib -type f -name "libc*" -prune -exec ln -sv '{}' . \;
 
-          export LLVM_INSTALL_DIR=$TLD/${{ steps.platform.outputs.sysroot_dir }}/usr/local/llvm${{ env.CLANG_VERSION }}
+          export LLVM_INSTALL_DIR=$TLD/${{ steps.platform.outputs.sysroot_dir }}
         elif [[ "${{ matrix.platform }}" == "linux" ]]; then
           export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
         fi
@@ -1397,6 +1489,8 @@ jobs:
 
         mkdir -pv $TLD/${{ env.BUILD_DIR }}
         ln -sv $TLD/${{ env.BUILD_DIR }} build
+
+        du -h $TLD/${{ steps.platform.outputs.sysroot_dir }}
 
         source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
 
