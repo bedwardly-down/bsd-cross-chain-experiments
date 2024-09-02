@@ -762,30 +762,17 @@ jobs:
           ${{ steps.key.outputs.sysroot_key }}
         lookup-only: true
 
-    # Cleanup so that Sysroot creation doesn't fail; it can get big
-    - name: Prepare ${{ matrix.platform }} Runner
-      id: runner
+    - name: Load ${{ matrix.stage }} ccache
+      id: ld_ccache
       if: |
         steps.load.outputs.cache-hit != 'true'
-      run: |
-        export TLD=$GITHUB_WORKSPACE
-        # Need this to decompress archive
-        sudo apt-get install -y lzma
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ env.CCACHE_DIR }}
+        key: |
+          ${{ matrix.platform }}-${{ matrix.version }}-ccache-key
 
-        sudo find / -type d -name "docker" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "dotnet" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "ghc" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "mono" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "pipx" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "chrom*" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "microsoft" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "$AGENT_TOOLSDIRECTORY" -prune -exec rm -rf '{}' \+
-        sudo find /usr/local -type d -name "boost" -prune -exec rm -rf '{}' \;
-        
-        source $TLD/${{ env.BSD_DEPS_SCRIPT }}
-        
-        echo "bsd_thirdparty_deps=$BSD_THIRDPARTY_DEPS" >> "$GITHUB_OUTPUT"
-        
     - name: Load ${{ matrix.shared }} Dependencies Cache
       id: shared
       if: |
@@ -807,17 +794,65 @@ jobs:
 
         bash $TLD/${{ env.DEPS_AFT }}
 
-    - name: Install ${{ matrix.shared }} Dependencies
-      id: install
+    # Cleanup so that Sysroot creation doesn't fail; it can get big
+    - name: Prepare ${{ matrix.platform }} Runner
+      id: runner
       if: |
         steps.load.outputs.cache-hit != 'true'
       run: |
         export TLD=$GITHUB_WORKSPACE
 
+        # Grab required libraries and tools
         sudo apt-get update
-        sudo apt-get install -y wget
+        sudo apt-get install -y lzma wget memcached
+
+        sudo find / -type d -name "docker" -prune -exec rm -rf '{}' \+
+        sudo find / -type d -name "dotnet" -prune -exec rm -rf '{}' \+
+        sudo find / -type d -name "ghc" -prune -exec rm -rf '{}' \+
+        sudo find / -type d -name "mono" -prune -exec rm -rf '{}' \+
+        sudo find / -type d -name "pipx" -prune -exec rm -rf '{}' \+
+        sudo find / -type d -name "chrom*" -prune -exec rm -rf '{}' \+
+        sudo find / -type d -name "microsoft" -prune -exec rm -rf '{}' \+
+        sudo find / -type d -name "$AGENT_TOOLSDIRECTORY" -prune -exec rm -rf '{}' \+
+        sudo find /usr/local -type d -name "boost" -prune -exec rm -rf '{}' \;
+        
+        source $TLD/${{ env.BSD_DEPS_SCRIPT }}
+        
+        echo "bsd_thirdparty_deps=$BSD_THIRDPARTY_DEPS" >> "$GITHUB_OUTPUT"
 
         rm -rf $TLD/${{ steps.define.outputs.shared_dir }}
+
+    - name: Prepare Memcached
+      id: memcached
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      env:
+        MEMORY: "4096"
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        # configure memcached
+        echo "-m ${{ env.MEMORY }}" | sudo tee -a /etc/memcached.conf
+
+        # Run memcached
+        sudo systemctl restart memcached
+
+        echo 'memory=${{ env.MEMORY }}' >> "$GITHUB_OUTPUT"
+        echo 'sock=${{ env.SOCK }}' >> "$GITHUB_OUTPUT"
+
+        sudo ss -plunt
+
+    - name: Checkout ${{ matrix.platform }} 14.0 source
+      id: base
+      if: |
+        matrix.version != '14.0' &&
+        steps.load.outputs.cache-hit != 'true'
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        path: 'base'
+        repository: 'freebsd/freebsd-src'
+        ref: 'releng/14.0'
 
     - name: Checkout ${{ matrix.platform }} ${{ matrix.version }} source
       id: source
@@ -853,11 +888,24 @@ jobs:
 
         cd $TLD/freebsd
 
-        cp -rf $TLD/cross/build/freebsd/sysroot/Makefile.inc1 .
-        cp -rf $TLD/cross/build/freebsd/sysroot/mk/* ./share/mk
-        cp -rf $TLD/cross/build/freebsd/sysroot/tools/* ./tools/build
-        patch -p1 -i $TLD/cross/patches/freebsd/Bemake-build-fix.patch
+        # Purge current share/mk + tools/build and replace with baseline version's to allow unified patching
+        if [[ "${{ matrix.version }}" != "14.0" ]]; then
+          rm -rf share/mk tools/build contrib/llvm-project usr.bin/clang lib/clang lib/ncurses
+          mv -v $TLD/base/Makefile.inc1 .
+          mv -v $TLD/base/share/mk share
+          mv -v $TLD/base/tools/build tools
+          mv -v $TLD/base/contrib/llvm-project contrib
+          mv -v $TLD/base/usr.bin/clang usr.bin
+          mv -v $TLD/base/lib/clang lib
+          mv -v $TLD/base/lib/ncurses lib
+          rm -rf $TLD/base
 
+          #else
+          # Create this missing folder
+          #mkdir -p usr.bin/clang/llvm-min-tblgen
+        fi
+
+        patch -p1 -i $TLD/cross/patches/freebsd/Bemake-build-fix.patch
         cd $TLD
 
     - name: Build ${{ matrix.platform }} ${{ matrix.version }} Sysroot
@@ -880,23 +928,22 @@ jobs:
           export SYSROOT_INC="$PREFIX_DIR/include"
           export SYSROOT_MK="$PREFIX_DIR/share/mk"
 
-          #export CFLAGS="-target x86_64-linux-gnu"
-          #export CXXFLAGS="-target x86_64-linux-gnu"
+          #export LLVM_INSTALL_DIR=/usr/local/llvm${{ env.CLANG_VERSION }}
+          #export CC=$LLVM_INSTALL_DIR/bin/clang
+          #export CXX=$LLVM_INSTALL_DIR/bin/clang++
+          #export CPP=$LLVM_INSTALL_DIR/bin/clang-cpp
+          #export NM=$LLVM_INSTALL_DIR/bin/llvm-nm
+          #export RANLIB=$LLVM_INSTALL_DIR/bin/llvm-ranlib
+          #export STRIP=$LLVM_INSTALL_DIR/bin/llvm-strip
+          #export AR=$LLVM_INSTALL_DIR/bin/llvm-ar
+          #export LD=$LLVM_INSTALL_DIR/bin/ld.lld
 
-          export LLVM_INSTALL_DIR=/usr/local/llvm${{ env.CLANG_VERSION }}
-          export CC=$LLVM_INSTALL_DIR/bin/clang
-          export CXX=$LLVM_INSTALL_DIR/bin/clang++
-          export CPP=$LLVM_INSTALL_DIR/bin/clang-cpp
-          export NM=$LLVM_INSTALL_DIR/bin/llvm-nm
-          export RANLIB=$LLVM_INSTALL_DIR/bin/llvm-ranlib
-          export STRIP=$LLVM_INSTALL_DIR/bin/llvm-strip
-          export AR=$LLVM_INSTALL_DIR/bin/llvm-ar
-          export LD=$LLVM_INSTALL_DIR/bin/ld.lld
+          #export LLVM_TBLGEN=$LLVM_INSTALL_DIR/bin/llvm-tblgen
 
-          export XCC=$CC
-          export XCXX=$CXX
-          export XCPP=$CPP
-          export XLD=$LD
+          #export XCC=$CC
+          #export XCXX=$CXX
+          #export XCPP=$CPP
+          #export XLD=$LD
 
           export TARGETS="TARGET=amd64 TARGET_ARCH=amd64"
           
@@ -906,11 +953,27 @@ jobs:
           pkg update
           
           # Grab the required compiler and toolchain
-          pkg install -y llvm${{ env.CLANG_VERSION }} gcc${{ env.GCC_VERSION }} python311
-          
+          pkg install -y \
+            llvm${{ env.CLANG_VERSION }} \
+            gcc${{ env.GCC_VERSION }} \
+            python311 ccache4 \
+            memcached
+
           # As recommended here: https://wiki.freebsd.org/BuildingFreeBSDWithClang#Quickstart
           echo "MK_WERROR=no" | tee -a /etc/make.conf
           echo "NO_FSCHG=" | tee -a /etc/make.conf
+          echo "WITH_META_MODE=YES" | tee -a /etc/make.conf
+          echo "WITH_DIRDEPS_BUILD=yes" | tee -a /etc/make.conf
+          echo "WITH_CCACHE_BUILD=yes" | tee -a /etc/make.conf
+
+          echo "CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}" | tee -a /etc/make.conf
+          
+          # Create the ccache directory
+          mkdir -pv $TLD/${{ env.CCACHE_DIR }}
+
+          # Configure memcached
+          echo "memcached_conf = --SERVER=localhost:11211" | tee -a $TLD/${{ env.CCACHE_DIR }}/ccache.conf
+          echo "memcached_only = true" | tee -a $TLD/${{ env.CCACHE_DIR }}/ccache.conf
 
           # Prepare bootstrapping
           cd $TLD/freebsd/contrib/bmake
@@ -931,10 +994,10 @@ jobs:
             -j $(nproc) \
             buildworld
 
-          export DESTDIR=$MAKEOBJDIRPREFIX
-          $SYSROOT_BIN/bmake $TARGETS \
-            -j $(nproc) \
-            installworld
+          #export DESTDIR=$MAKEOBJDIRPREFIX
+          #$SYSROOT_BIN/bmake $TARGETS \
+          #  -j $(nproc) \
+          #  installworld
 
           $SYSROOT_BIN/bmake $TARGETS \
             -j $(nproc) \
@@ -972,6 +1035,18 @@ jobs:
           ${{ steps.define.outputs.sysroot_dir }}
         key: |
           ${{ steps.key.outputs.sysroot_key }}
+
+    - name: Cache FreeBSD ccache
+      id: ccache
+      if: |
+        steps.load.outputs.cache-hit != 'true' &&
+        always()
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ env.CCACHE_DIR }}
+        key: |
+          ${{ matrix.platform }}-${{ matrix.version }}-ccache-key
 
   build_prepare:
     name: Prepare Build Stage
