@@ -32,6 +32,7 @@ env:
   JSON_SCRIPT: 'cross/build/linux/get-json-value.sh'
   LLVM_BUILD_SCRIPT: 'cross/build/linux/source-llvm-build-vars.sh'
   LLVM_STATIC_SCRIPT: 'cross/build/linux/get-llvm-static-libs.sh'
+  LLVM_UA_SCRIPT: 'cross/build/linux/update-alternatives-llvm.sh'
 
   # General Shared Hash Files
   CCACHE_HASH_SOURCE: "ccache-hits.txt"
@@ -217,7 +218,13 @@ jobs:
             - stage: sysroot
               platform: freebsd
               shared: shared
-              musl: v1.2.5
+              binutils: '2.43.1'
+              gcc: '13.3.0'
+              isl: '0.24'
+              gmp: '6.3.0'
+              mpc: '1.3.1'
+              mpfr: '4.2.1'
+              musl: '1.2.5'
 
     - name: Prepare ${{ matrix.stage }} Matrix
       id: build
@@ -738,54 +745,50 @@ jobs:
         echo 'shared_dir=${{ needs.deps.outputs.deps_dir_shared }}' >> "$GITHUB_OUTPUT"
         echo 'shared_key=${{ needs.deps.outputs.deps_key_shared }}' >> "$GITHUB_OUTPUT"
 
-    - name: Prepare ${{ matrix.platform }} Sysroot
+    - name: Define Sysroot
       id: key
       env:
         SYSROOT_HASH: "${{ hashFiles(format('**/freebsd/{0}', env.DEPS_HASH_SOURCE )) }}"
         SYSROOT_KEY: "${{ matrix.platform }}-${{ matrix.version }}-sysroot"
       run: |
+        export TLD=$GITHUB_WORKSPACE
+
         export VERSION=`echo ${{ matrix.version }} | sed -e "s@\.@_@"`
 
         echo "sysroot_key_${{ matrix.platform }}_$VERSION=${{ env.SYSROOT_KEY }}-${{ env.SYSROOT_HASH }}" >> "$GITHUB_OUTPUT"
         echo 'sysroot_key=${{ env.SYSROOT_KEY }}-${{ env.SYSROOT_HASH }}' >> "$GITHUB_OUTPUT"
 
-        echo "cross_host_${{ matrix.platform }}_$VERSION=x86_64-unknown-${{ matrix.platform }}${{ matrix.version }}" >> "$GITHUB_OUTPUT"
-        echo 'cross_host=x86_64-unknown-${{ matrix.platform }}${{ matrix.version }}' >> "$GITHUB_OUTPUT"
+        echo "cross_host_${{ matrix.platform }}_$VERSION=x86_64-pc-${{ matrix.platform }}${{ matrix.version }}" >> "$GITHUB_OUTPUT"
+        echo 'cross_host=x86_64-pc-${{ matrix.platform }}${{ matrix.version }}' >> "$GITHUB_OUTPUT"
+
+        mkdir -pv $TLD/${{ env.CCACHE_DIR }}
+        touch $TLD/${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
 
     - name: Load ${{ matrix.stage }} cache
       id: load
       uses: actions/cache/restore@v4
       with:
-        path:
+        path: |
           ${{ steps.define.outputs.sysroot_dir }}
         key: |
           ${{ steps.key.outputs.sysroot_key }}
         lookup-only: true
 
-    # Cleanup so that Sysroot creation doesn't fail; it can get big
-    - name: Prepare ${{ matrix.platform }} Runner
-      id: runner
+    - name: Load ${{ matrix.stage }} ccache
+      id: ld_ccache
       if: |
         steps.load.outputs.cache-hit != 'true'
-      run: |
-        export TLD=$GITHUB_WORKSPACE
-        # Need this to decompress archive
-        sudo apt-get install -y lzma
+      uses: actions/cache/restore@v4
+      env:
+        HASH: "${{ hashFiles(format('**/{0}', env.SOURCE_HASH_SOURCE)) }}"
+      with:
+        path: |
+          ${{ env.CCACHE_DIR }}
+        key: |
+          ${{ matrix.platform }}-${{ matrix.version }}-ccache-key-$HASH
+        restore-keys: |
+          ${{ matrix.platform }}-${{ matrix.version }}-ccache-key-
 
-        sudo find / -type d -name "docker" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "dotnet" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "ghc" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "mono" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "pipx" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "chrom*" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "microsoft" -prune -exec rm -rf '{}' \+
-        sudo find / -type d -name "$AGENT_TOOLSDIRECTORY" -prune -exec rm -rf '{}' \+
-        sudo find /usr/local -type d -name "boost" -prune -exec rm -rf '{}' \;
-        
-        source $TLD/${{ env.BSD_DEPS_SCRIPT }}
-        
-        echo "bsd_thirdparty_deps=$BSD_THIRDPARTY_DEPS" >> "$GITHUB_OUTPUT"
-        
     - name: Load ${{ matrix.shared }} Dependencies Cache
       id: shared
       if: |
@@ -807,148 +810,579 @@ jobs:
 
         bash $TLD/${{ env.DEPS_AFT }}
 
-    - name: Install ${{ matrix.shared }} Dependencies
-      id: install
+    # Cleanup so that Sysroot creation doesn't fail; it can get big
+    - name: Prepare ${{ matrix.platform }} Runner
+      id: runner
       if: |
         steps.load.outputs.cache-hit != 'true'
       run: |
         export TLD=$GITHUB_WORKSPACE
 
+        # Grab required libraries and tools
         sudo apt-get update
-        sudo apt-get install -y wget
 
-        rm -rf $TLD/${{ steps.define.outputs.shared_dir }}
+        source $TLD/${{ env.DEPS_SCRIPT }}
+        bash $TLD/cross/build/source/install-shared-deps.sh
 
-    - name: Checkout ${{ matrix.platform }} ${{ matrix.version }} source
-      id: source
+        sudo apt-get install -y lzma wget memcached \
+          libc6-dev gcc-multilib libnewlib-dev \
+          libgcc-12-dev libgcc-s1 musl-dev \
+          libgmp3-dev libmpc-dev libmpfr-dev libisl-dev
+
+        #sudo find / -type d -name "docker" -prune -exec rm -rf '{}' \+
+        #sudo find / -type d -name "dotnet" -prune -exec rm -rf '{}' \+
+        #sudo find / -type d -name "ghc" -prune -exec rm -rf '{}' \+
+        #sudo find / -type d -name "mono" -prune -exec rm -rf '{}' \+
+        #sudo find / -type d -name "pipx" -prune -exec rm -rf '{}' \+
+        #sudo find / -type d -name "chrom*" -prune -exec rm -rf '{}' \+
+        #sudo find / -type d -name "microsoft" -prune -exec rm -rf '{}' \+
+        #sudo find / -type d -name "$AGENT_TOOLSDIRECTORY" -prune -exec rm -rf '{}' \+
+        #sudo find /usr/local -type d -name "boost" -prune -exec rm -rf '{}' \;
+
+    - name: Prepare Memcached
+      id: memcached
       if: |
         steps.load.outputs.cache-hit != 'true'
+      env:
+        MEMORY: "4096"
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        # configure memcached
+        echo "-m ${{ env.MEMORY }}" | sudo tee -a /etc/memcached.conf
+
+        # Run memcached
+        sudo systemctl restart memcached
+
+        echo 'memory=${{ env.MEMORY }}' >> "$GITHUB_OUTPUT"
+
+        sudo ss -plunt
+
+    - name: Prepare Sysroot
+      id: builder
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
+
+        # FreeBSD base images
+        wget http://ftp.freebsd.org/pub/FreeBSD/releases/amd64/${{ matrix.version }}-RELEASE/base.txz
+
+        mkdir -pv $PREFIX_DIR/usr/lib \
+          $PREFIX_DIR/lib \
+          $TLD/builder
+
+        cd $TLD/builder
+
+        tar xf ../base.txz
+        mv -v usr/include $PREFIX_DIR/
+        mv -v usr/lib/*.o $PREFIX_DIR/lib
+        rm -rf usr/lib/libca* usr/lib/libco* usr/lib/libcr* usr/lib/libcu* usr/lib/libct* usr/lib/libcxg* \
+          lib/libca* lib/libcr* lib/libct*
+        mv -v usr/lib/libc* $PREFIX_DIR/lib
+        mv -v lib/libc* $PREFIX_DIR/lib
+        mv -v lib/libm.so* $PREFIX_DIR/lib
+        ln -sv $PREFIX_DIR/lib/*.o $PREFIX_DIR
+        mv -v usr/lib/libm.so* $PREFIX_DIR/lib
+        cd $TLD
+        
+        rm -rf base.txz builder
+
+        export CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}
+        export CCACHE_MAXSIZE="512M"
+
+        # Configure memcached
+        mkdir -pv $CCACHE_DIR
+        echo "memcached_conf = --SERVER=localhost:11211" | tee -a $CCACHE_DIR/ccache.conf
+        echo "memcached_only = true" | tee -a $CCACHE_DIR/ccache.conf
+
+        # Configure Source hash
+        mkdir -pv $TLD/${{ env.SOURCE_DIR }}
+        touch $TLD/${{ env.SOURCE_DIR }}/${{ env.SOURCE_HASH_SOURCE }}
+
+    - name: Prepare Source Key
+      id: hash
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      env:
+        HASH: "${{ hashFiles(format('**/{0}', env.SOURCE_HASH_SOURCE)) }}"
+      run: |
+        echo 'source_key=${{ env.HASH }}' >> "$GITHUB_OUTPUT"
+        
+    - name: Load Cross-Compiler Dependencies cache
+      id: cdeps
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ env.SOURCE_DIR }}
+        key: |
+          ${{ matrix.platform }}-${{ matrix.version }}-sysroot-deps-${{ steps.hash.outputs.source_key }}
+
+    - name: Checkout LLVM Source from Git
+      id: llvm
+      if: |
+        steps.load.outputs.cache-hit != 'true' &&
+        steps.cdeps.outputs.cache-hit != 'true'
       uses: actions/checkout@v4
       with:
+        repository: 'llvm/llvm-project'
+        path: '${{ env.SOURCE_DIR }}/llvm'
         submodules: recursive
-        path: 'freebsd'
-        repository: 'freebsd/freebsd-src'
-        ref: 'releng/${{ matrix.version }}'
+        ref: 'release/17.x'
 
-    - name: Prepare Bmake Build Tools
-      id: bmake
+    - name: Download Cross-Compiler Dependencies
+      id: source
+      if: |
+        steps.load.outputs.cache-hit != 'true' &&
+        steps.cdeps.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        cd $TLD/${{ env.SOURCE_DIR }}
+        wget https://ftp.gnu.org/gnu/binutils/binutils-${{ matrix.binutils }}.tar.xz
+        wget https://ftp.gnu.org/gnu/gcc/gcc-${{ matrix.gcc }}/gcc-${{ matrix.gcc }}.tar.xz
+        wget https://ftp.gnu.org/gnu/gmp/gmp-${{ matrix.gmp }}.tar.xz
+        wget https://gcc.gnu.org/pub/gcc/infrastructure/isl-${{ matrix.isl }}.tar.bz2
+        wget https://ftp.gnu.org/gnu/mpc/mpc-${{ matrix.mpc }}.tar.gz
+        wget https://ftp.gnu.org/gnu/mpfr/mpfr-${{ matrix.mpfr }}.tar.xz
+        wget http://git.etalabs.net/cgit/musl/snapshot/musl-${{ matrix.musl }}.tar.gz
+        cd $TLD
+
+    - name: Cache Cross-Compiler Dependencies
+      id: cdcache
+      if: |
+        steps.load.outputs.cache-hit != 'true' &&
+        steps.cdeps.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ env.SOURCE_DIR }}
+        key: |
+          ${{ matrix.platform }}-${{ matrix.version }}-sysroot-deps-${{ steps.hash.outputs.source_key }}
+
+    - name: Build Binutils Stage 1
+      id: binutils-s1
       if: |
         steps.load.outputs.cache-hit != 'true'
       run: |
         export TLD=$GITHUB_WORKSPACE
 
-        cd $TLD/freebsd/contrib
-        rm -rf bmake
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
         
-        # grab the latest bmake version
-        wget -c http://www.crufty.net/ftp/pub/sjg/bmake.tar.gz
-        wget -c http://www.crufty.net/ftp/pub/sjg/mk.tar.gz
+        export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
+        sudo bash $TLD/${{ env.LLVM_UA_SCRIPT}} '${{ env.CLANG_VERSION }}' '10000'
+        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
 
-        tar xf bmake.tar.gz
-        rm -rf bmake.tar.gz
+        export TARGET=${{ steps.key.outputs.cross_host }}
+        export PATH="$SYSROOT_DIR/bin:$PATH"
 
-        cd bmake
-        tar xf ../mk.tar.gz
-        rm -rf ../mk.tar.gz
+        export CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}
+        export CC="ccache clang"
+        export CXX="ccache clang++"
+        export CPP=clang-cpp
+        export NM=llvm-nm
+        export RANLIB=llvm-ranlib
+        export STRIP=llvm-strip
+        export AR=llvm-ar
+        export AS=llvm-as
+        export LD=ld.lld
 
-        cd $TLD/freebsd
+        # Build these using this as a basis: http://clfs.org/view/git/x86_64-64/cross-tools
+        mkdir -pv $TLD/builder
 
-        cp -rf $TLD/cross/build/freebsd/sysroot/Makefile.inc1 .
-        cp -rf $TLD/cross/build/freebsd/sysroot/mk/* ./share/mk
-        cp -rf $TLD/cross/build/freebsd/sysroot/tools/* ./tools/build
-        patch -p1 -i $TLD/cross/patches/freebsd/Bemake-build-fix.patch
+        # Use this to build cross-compiler: https://wiki.osdev.org/GCC_Cross-Compiler#Which_binutils_version_to_choose
+        cd $TLD/builder
+        # Build cross-binutils
+        tar xf $TLD/${{ env.SOURCE_DIR }}/binutils*
+        mkdir -pv binutils-build
+        cd binutils-build
+  
+        ../binutils-${{ matrix.binutils }}/configure \
+          --target=$TARGET \
+          --prefix=$SYSROOT_DIR \
+          --with-sysroot \
+          --disable-nls \
+          --disable-werror
+        make -j$(nproc)
+        make install
+
+        echo "Binutils complete" | tee -a $TLD/${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
+
+    - name: Build GMP Stage 1
+      id: gmp-s1
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
+        
+        export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
+        sudo bash $TLD/${{ env.LLVM_UA_SCRIPT}} '${{ env.CLANG_VERSION }}' '10000'
+        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
+
+        export TARGET=${{ steps.key.outputs.cross_host }}
+        export PATH="$SYSROOT_DIR/bin:$PATH"
+
+        export CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}
+        export CC="ccache clang"
+        export CXX="ccache clang++"
+        export CPP=clang-cpp
+        export NM=$TARGET-nm
+        export RANLIB=$TARGET-ranlib
+        export STRIP=$TARGET-strip
+        export AR=$TARGET-ar
+        export AS=$TARGET-as
+        export LD=$TARGET-ld
+
+        # Build these using this as a basis: http://clfs.org/view/git/x86_64-64/cross-tools
+        mkdir -pv $TLD/builder
+        cd $TLD/builder
+        # Build GMP first
+        tar xf $TLD/${{ env.SOURCE_DIR }}/gmp*
+        cd gmp-${{ matrix.gmp }}
+        ./configure \
+          --prefix=$SYSROOT_DIR \
+          --host=$TARGET \
+          --enable-mpbsd \
+          --enable-fft \
+          --enable-cxx \
+          --enable-static \
+          --enable-shared 
+        make -j$(nproc)
+        make install
+
+        echo "GMP complete" | tee -a $TLD/${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
+
+    - name: Build MPFR Stage 1
+      id: mpfr-s1
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
+        
+        export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
+        sudo bash $TLD/${{ env.LLVM_UA_SCRIPT}} '${{ env.CLANG_VERSION }}' '10000'
+        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
+
+        export TARGET=${{ steps.key.outputs.cross_host }}
+        export PATH="$SYSROOT_DIR/bin:$PATH"
+
+        export CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}
+        export CC="ccache clang"
+        export CXX="ccache clang++"
+        export CPP=clang-cpp
+        export NM=$TARGET-nm
+        export RANLIB=$TARGET-ranlib
+        export STRIP=$TARGET-strip
+        export AR=$TARGET-ar
+        export AS=$TARGET-as
+        export LD=$TARGET-ld
+
+        cd $TLD/builder
+        # Build MPFR
+        tar xf $TLD/${{ env.SOURCE_DIR }}/mpfr*
+        cd mpfr-${{ matrix.mpfr }}
+        ./configure \
+          --prefix=$SYSROOT_DIR \
+          --with-gnu-ld \
+          --enable-static \
+          --enable-shared \
+          --host=$TARGET \
+          --with-gmp=$SYSROOT_DIR
+        make -j$(nproc)
+        make install
+
+        echo "MPFR complete" | tee -a $TLD/${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
+
+    - name: Build MPC Stage 1
+      id: mpc-s1
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
+        
+        export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
+        sudo bash $TLD/${{ env.LLVM_UA_SCRIPT}} '${{ env.CLANG_VERSION }}' '10000'
+        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
+
+        export TARGET=${{ steps.key.outputs.cross_host }}
+        export PATH="$SYSROOT_DIR/bin:$PATH"
+
+        export CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}
+        export CC="ccache clang"
+        export CXX="ccache clang++"
+        export CPP=clang-cpp
+        export NM=$TARGET-nm
+        export RANLIB=$TARGET-ranlib
+        export STRIP=$TARGET-strip
+        export AR=$TARGET-ar
+        export AS=$TARGET-as
+        export LD=$TARGET-ld
+
+        cd $TLD/builder
+        # Build MPC
+        tar xf $TLD/${{ env.SOURCE_DIR }}/mpc*
+        cd mpc-${{ matrix.mpc }}
+        ./configure \
+          --prefix=$SYSROOT_DIR \
+          --with-gnu-ld \
+          --enable-static \
+          --enable-shared \
+          --host=$TARGET \
+          --with-gmp=$SYSROOT_DIR \
+          --with-mpfr=$SYSROOT_DIR
+        make -j$(nproc)
+        make install
+
+        echo "MPC complete" | tee -a $TLD/${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
+
+    - name: Build ISL Stage 1
+      id: isl-s1
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
+        
+        export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
+        sudo bash $TLD/${{ env.LLVM_UA_SCRIPT}} '${{ env.CLANG_VERSION }}' '10000'
+        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
+
+        export TARGET=${{ steps.key.outputs.cross_host }}
+        export PATH="$SYSROOT_DIR/bin:$PATH"
+
+        export CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}
+        export CC="ccache clang"
+        export CXX="ccache clang++"
+        export CPP=clang-cpp
+        export NM=$TARGET-nm
+        export RANLIB=$TARGET-ranlib
+        export STRIP=$TARGET-strip
+        export AR=$TARGET-ar
+        export AS=$TARGET-as
+        export LD=$TARGET-ld
+
+        cd $TLD/builder
+        # Build ISL
+        tar xf $TLD/${{ env.SOURCE_DIR }}/isl*
+        cd isl-${{ matrix.isl }}
+        ./configure \
+          --prefix=$SYSROOT_DIR \
+          --host=$TARGET \
+          --disable-static \
+          --with-gmp=$SYSROOT_DIR \
+          --with-mpfr=$SYSROOT_DIR \
+          --with-mpc=$SYSROOT_DIR
+        make -j$(nproc)
+        make install
+
+        echo "ISL complete" | tee -a $TLD/${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
+
+    - name: Build GCC Stage 1
+      id: gcc-s1
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
+        
+        export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
+        sudo bash $TLD/${{ env.LLVM_UA_SCRIPT}} '${{ env.CLANG_VERSION }}' '10000'
+        source $TLD/${{ env.LLVM_BUILD_SCRIPT }}
+
+        export TARGET=${{ steps.key.outputs.cross_host }}
+        export PATH="$SYSROOT_DIR/bin:$PATH"
+
+        export CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}
+        export CC="ccache clang"
+        export CXX="ccache clang++"
+        export CPP=clang-cpp
+        export NM=$TARGET-nm
+        export RANLIB=$TARGET-ranlib
+        export STRIP=$TARGET-strip
+        export AR=$TARGET-ar
+        export AS=$TARGET-as
+        export LD=$TARGET-ld
+
+        export SPECS="$TLD/cross/patches/linux/specs.patch"
+
+        cd $TLD/builder
+        # Build cross-gcc
+        tar xf $TLD/${{ env.SOURCE_DIR }}/gcc*
+        mkdir -pv gcc-build
+
+        # Patch to fix pathing
+        cd gcc-${{ matrix.gcc }}
+        sed -i '' -e "s@/tools@$SYSROOT_DIR@" $SPECS
+        patch -Np1 -i $SPECS
+
+        echo -en '\n#undef STANDARD_STARTFILE_PREFIX_1\n#define STANDARD_STARTFILE_PREFIX_1 "$SYSROOT_DIR/lib/"\n' >> gcc/config/linux.h
+        echo -en '\n#undef STANDARD_STARTFILE_PREFIX_2\n#define STANDARD_STARTFILE_PREFIX_2 ""\n' >> gcc/config/linux.h
+
+        touch $SYSROOT_DIR/include/limits.h
+
+        # Tell the compiler to use the FreeBSD headers from the sysroot here so that it compiles properly
+        cd ../gcc-build
+        ../gcc-${{ matrix.gcc }}/configure \
+          --prefix=$SYSROOT_DIR \
+          --disable-nls \
+          --without-headers \
+          --enable-languages=c,c++ \
+          --target=$TARGET \
+          --with-gmp=$SYSROOT_DIR \
+          --with-isl=$SYSROOT_DIR \
+          --with-mpfr=$SYSROOT_DIR \
+          --with-mpc=$SYSROOT_DIR \
+          --with-newlib \
+          --with-system-zlib
+
+        echo "Make breaks here"
+
+        export LD_LIBRARY_PATH=$PREFIX/lib
+        make -j$(nproc) all-gcc
+        make -j$(nproc) all-target-libgcc
+        make install-gcc
+        make install-target-libgcc
+
+        echo "GCC complete" | tee -a $TLD/${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
+
+    - name: Cleanup Stage 1
+      id: clean-s1
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+
+        cd $TLD/builder
+        rm -rfv *
+
+    - name: Build Binutils Stage 2
+      id: binutils-s2
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
+        
+        export TARGET=${{ steps.key.outputs.cross_host }}
+        export PATH="$SYSROOT_DIR/bin:$PATH"
+
+        export CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}
+        export CC="ccache $TARGET-gcc"
+        export CXX="ccache $TARGET-g++"
+        export CPP=$TARGET-cpp
+        export NM=$TARGET-nm
+        export RANLIB=$TARGET-ranlib
+        export STRIP=$TARGET-strip
+        export AR=$TARGET-ar
+        export AS=$TARGET-as
+        export LD=$TARGET-ld
+
+        # Build cross-binutils
+        tar xf $TLD/${{ env.SOURCE_DIR }}/binutils*
+        mkdir -pv binutils-build
+        cd binutils-build
+  
+        ../binutils-${{ matrix.binutils }}/configure \
+          --target=$TARGET \
+          --prefix=$SYSROOT_DIR \
+          --with-sysroot \
+          --enable-libssp \
+          --enable-gold \
+          --enable-ld \
+          --disable-nls \
+          --disable-werror
+        make -j$(nproc)
+        make install
+
+        echo "Binutils complete" | tee -a $TLD/${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
+
+    - name: Build LLVM Stage 3
+      id: llvm-s3
+      if: |
+        steps.load.outputs.cache-hit != 'true'
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
+        
+        export TARGET=${{ steps.key.outputs.cross_host }}
+        export PATH="$SYSROOT_DIR/bin:$PATH"
+
+        export CCACHE_DIR=$TLD/${{ env.CCACHE_DIR }}
+        export CC="ccache $TARGET-gcc"
+        export CXX="ccache $TARGET-g++"
+        export CPP=$TARGET-cpp
+        export NM=$TARGET-nm
+        export RANLIB=$TARGET-ranlib
+        export STRIP=$TARGET-strip
+        export AR=$TARGET-ar
+        export AS=$TARGET-as
+        export LD=$TARGET-gold
+
+        cd $TLD/${{ env.SOURCE_DIR }}/llvm
+
+        cmake -G Ninja ./llvm \
+          -B build \
+          -DCMAKE_C_COMPILER=$CC \
+          -DCMAKE_CXX_COMPILER=$CXX \
+          -DCMAKE_ASM_COMPILER=$AS \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_INSTALL_PREFIX=$PREFIX_DIR \
+          -DCMAKE_CXX_STANDARD=${{ env.CXX_STANDARD_VERSION }} \
+          -DCMAKE_BUILD_TYPE=MinSizeRel \
+          -DCMAKE_USE_LINKER=lld \
+          -DCMAKE_SYSTEM_NAME="FreeBSD" \
+          -DCMAKE_HOST_TRIPLE=$TARGET \
+          -DCMAKE_CXX_FLAGS="-isysroot $SYSROOT_DIR/include \
+            --sysroot=$SYSROOT_DIR \
+            --target=$TARGET" \
+          -DLLVM_ENABLE_PROJECTS="clang;libclc;polly" \
+          -DLLVM_ENABLE_RUNTIMES="all" \
+          -DLLVM_INCLUDE_EXAMPLES=OFF \
+          -DLLVM_NSTALL_BINUTILS_SYMLINKS=TRUE \
+          -DLLVM_INSTALL_CCTOOLS_SYMLINKS=TRUE \
+          -DLLVM_STATIC_LINK_CXX_STDLIB=TRUE
+
+        cmake --build build --parallel $(nproc)
+        cmake --build build --install
+
+        echo "LLVM complete" | tee -a $TLD/${{ env.CCACHE_DIR }}/${{ env.CCACHE_HASH_SOURCE }}
 
         cd $TLD
+
+        rm -rfv $TLD/${{ env.SOURCE_DIR }} $TLD/builder
 
     - name: Build ${{ matrix.platform }} ${{ matrix.version }} Sysroot
       id: sysroot
       if: |
         steps.load.outputs.cache-hit != 'true'
-      uses: vmactions/freebsd-vm@v1.0.8
-      with:
-        usesh: true
-        sync: rsync
-        release: |
-          ${{ matrix.version }}
-        run: |
-          export TLD=$GITHUB_WORKSPACE
-          export MAKEOBJDIRPREFIX=$TLD/builder
-          export PREFIX_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
-
-          export SYSROOT_DIR=$PREFIX_DIR
-          export SYSROOT_BIN="$PREFIX_DIR/bin"
-          export SYSROOT_INC="$PREFIX_DIR/include"
-          export SYSROOT_MK="$PREFIX_DIR/share/mk"
-
-          #export CFLAGS="-target x86_64-linux-gnu"
-          #export CXXFLAGS="-target x86_64-linux-gnu"
-
-          export LLVM_INSTALL_DIR=/usr/local/llvm${{ env.CLANG_VERSION }}
-          export CC=$LLVM_INSTALL_DIR/bin/clang
-          export CXX=$LLVM_INSTALL_DIR/bin/clang++
-          export CPP=$LLVM_INSTALL_DIR/bin/clang-cpp
-          export NM=$LLVM_INSTALL_DIR/bin/llvm-nm
-          export RANLIB=$LLVM_INSTALL_DIR/bin/llvm-ranlib
-          export STRIP=$LLVM_INSTALL_DIR/bin/llvm-strip
-          export AR=$LLVM_INSTALL_DIR/bin/llvm-ar
-          export LD=$LLVM_INSTALL_DIR/bin/ld.lld
-
-          export XCC=$CC
-          export XCXX=$CXX
-          export XCPP=$CPP
-          export XLD=$LD
-
-          export TARGETS="TARGET=amd64 TARGET_ARCH=amd64"
-          
-          mkdir -pv $PREFIX_DIR $MAKEOBJDIRPREFIX
-
-          pkg bootstrap -f -y
-          pkg update
-          
-          # Grab the required compiler and toolchain
-          pkg install -y llvm${{ env.CLANG_VERSION }} gcc${{ env.GCC_VERSION }} python311
-          
-          # As recommended here: https://wiki.freebsd.org/BuildingFreeBSDWithClang#Quickstart
-          echo "MK_WERROR=no" | tee -a /etc/make.conf
-          echo "NO_FSCHG=" | tee -a /etc/make.conf
-
-          # Prepare bootstrapping
-          cd $TLD/freebsd/contrib/bmake
-          sh mk/install-mk ./mk
-          sh boot-strap \
-            --with-default-sys-path=.../share/mk:$SYSROOT_MK \
-            --without-filemon \
-            --prefix=$PREFIX_DIR \
-            op=install
-          
-          ## Prepare sysroot for usage
-          cd $TLD/freebsd
-          $SYSROOT_BIN/bmake $TARGETS \
-            -j $(nproc) \
-            toolchain
-
-          $SYSROOT_BIN/bmake $TARGETS \
-            -j $(nproc) \
-            buildworld
-
-          export DESTDIR=$MAKEOBJDIRPREFIX
-          $SYSROOT_BIN/bmake $TARGETS \
-            -j $(nproc) \
-            installworld
-
-          $SYSROOT_BIN/bmake $TARGETS \
-            -j $(nproc) \
-            xdev-build
-
-          $SYSROOT_BIN/bmake $TARGETS \
-            -j $(nproc) \
-            xdev-install \
-            DESTDIR=$PREFIX_DIR
-          
-          cd $TLD
-
-          tar c $SYSROOT_DIR | xz -9 > freebsd.tar.xz
-          rm -rf $SYSROOT_DIR $TLD/freebsd $MAKEOBJDIRPREFIX
+      run: |
+        export TLD=$GITHUB_WORKSPACE
+        export SYSROOT_DIR=$TLD/${{ steps.define.outputs.sysroot_dir }}
+        export PREFIX_DIR=$SYSROOT_DIR/${{ steps.key.outputs.cross_host }}
+        
+        tar c $SYSROOT_DIR | xz -9 > freebsd.tar.xz
+        rm -rf $SYSROOT_DIR $TLD/freebsd $MAKEOBJDIRPREFIX
 
     # FreeBSD Vm Rsync hack; it doesn't copy over all files unless I compress and then decompress here
     - name: Prepare FreeBSD Sysroot Cache
@@ -972,6 +1406,20 @@ jobs:
           ${{ steps.define.outputs.sysroot_dir }}
         key: |
           ${{ steps.key.outputs.sysroot_key }}
+
+    - name: Cache FreeBSD ccache
+      id: ccache
+      if: |
+        steps.load.outputs.cache-hit != 'true' &&
+        always()
+      env:
+        HASH: "${{ hashFiles(format('**/{0}', env.CCACHE_HASH_SOURCE)) }}"
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ env.CCACHE_DIR }}
+        key: |
+          ${{ matrix.platform }}-${{ matrix.version }}-ccache-key-${{ env.HASH }}
 
   build_prepare:
     name: Prepare Build Stage
@@ -1143,16 +1591,6 @@ jobs:
 
           export SYSROOT_DIR=`bash ${{ env.JSON_SCRIPT }} $SYSROOT_JSON ".sysroot_dir_${{ matrix.platform }}_$VERSION"`
           export SYSROOT_KEY=`bash ${{ env.JSON_SCRIPT }} $SYSROOT_JSON ".sysroot_key_${{ matrix.platform }}_$VERSION"`
-
-        elif [[ "${{ matrix.platform }}" == "linux" ]]; then
-          echo 'platform_name_${{ matrix.platform }}=Linux' >> "$GITHUB_OUTPUT"
-          echo 'system_version_${{ matrix.platform }}=${{ matrix.version }}' >> "$GITHUB_OUTPUT"
-
-          echo "cross_host_${{ matrix.platform }}_$VERSION=$(gcc -dumpmachine)" >> "$GITHUB_OUTPUT"
-          echo 'cross_host=$(gcc -dumpmachine)' >> "$GITHUB_OUTPUT"
-
-          export SYSROOT_DIR='/'
-          export SYSROOT_KEY='null-key'
         fi
 
         echo "CROSS_HOST=$CROSS_HOST"
@@ -1425,7 +1863,7 @@ jobs:
         export LLVM_INSTALL_DIR=/usr/lib/llvm-${{ env.CLANG_VERSION }}
 
         # Set LLVM specific variables
-        sudo bash $TLD/cross/build/linux/update-alternatives-llvm.sh '${{ env.CLANG_VERSION }}' '10000'
+        sudo bash $TLD/${{ env.LLVM_UA_SCRIPT }} '${{ env.CLANG_VERSION }}' '10000'
 
         sudo mv -v /usr/lib/llvm-14 /usr/lib/llvm-bck
         sudo ln -sv $LLVM_INSTALL_DIR /usr/lib/llvm-14

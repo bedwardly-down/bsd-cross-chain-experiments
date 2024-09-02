@@ -3,8 +3,8 @@
 #     --slave /usr/bin/$1 $1 /usr/bin/$1-\${version} \\
 
 function register_clang_version {
-    local version=$1
-    local priority=$2
+    local version="$1"
+    local priority="$2"
 
     update-alternatives \
         --install /usr/bin/llvm-config       llvm-config      /usr/bin/llvm-config-${version} ${priority} \

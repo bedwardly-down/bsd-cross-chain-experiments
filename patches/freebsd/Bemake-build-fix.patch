@@ -1,10 +1,11 @@
-From b6c7b19f57d95eb87967c48636674afc4ae37220 Mon Sep 17 00:00:00 2001
+From 98b1a3259c25000440565a3376ba0c45de99311a Mon Sep 17 00:00:00 2001
 From: Brad D <social@brandongrows.me>
 Date: Sat, 31 Aug 2024 20:36:36 -0500
 Subject: [PATCH] bmake build fix
 
 ---
- Makefile.inc1                                 | 240 +++++++--------
+ Makefile                                      |  20 +-
+ Makefile.inc1                                 | 244 +++++++--------
  contrib/bmake/meta.h                          |   1 +
  contrib/bmake/mk/meta.sys.mk                  |   4 +
  .../varname-dot-make-path_filemon.mk          |   3 +-
@@ -44,10 +45,94 @@ Subject: [PATCH] bmake build fix
  tools/build/Makefile                          |  24 +-
  tools/build/mk/Makefile.boot                  |   6 +-
  tools/build/mk/Makefile.boot.pre              |   2 +-
- 40 files changed, 639 insertions(+), 632 deletions(-)
+ 41 files changed, 652 insertions(+), 643 deletions(-)
 
+diff --git a/Makefile b/Makefile
+index b36e27e7f..7a1085782 100644
+--- a/Makefile
++++ b/Makefile
+@@ -149,7 +149,7 @@ __DO_KERNELS?=yes
+ 
+ # Note: we use this awkward construct to be compatible with FreeBSD's
+ # old make used in 10.0 and 9.2 and earlier.
+-.if defined(MK_DIRDEPS_BUILD) && ${MK_DIRDEPS_BUILD} == "yes" && \
++.if defined(MK_DIRDEPS_BUILD) && "${MK_DIRDEPS_BUILD}" == "yes" && \
+     !make(showconfig) && !make(print-dir)
+ # targets/Makefile plays the role of top-level
+ .include "targets/Makefile"
+@@ -238,7 +238,7 @@ META_TGT_WHITELIST+=	build${libcompat}
+ # Only sanitize PATH on FreeBSD.
+ # PATH may include tools that are required to cross-build
+ # on non-FreeBSD systems.
+-.if ${.MAKE.OS} == "FreeBSD"
++.if "${.MAKE.OS}" == "FreeBSD"
+ PATH=	/sbin:/bin:/usr/sbin:/usr/bin
+ .endif
+ MAKEOBJDIRPREFIX?=	/usr/obj
+@@ -288,7 +288,7 @@ SUB_MAKE= ${MAKE} -m ${.CURDIR}/share/mk
+ _MAKE=	PATH=${PATH:Q} MAKE_CMD="${MAKE}" ${SUB_MAKE} -f Makefile.inc1 \
+ 	TARGET=${_TARGET} TARGET_ARCH=${_TARGET_ARCH} ${_MAKEARGS}
+ 
+-.if defined(MK_META_MODE) && ${MK_META_MODE} == "yes"
++.if defined(MK_META_MODE) && "${MK_META_MODE}" == "yes"
+ # Only allow meta mode for the whitelisted targets.  See META_TGT_WHITELIST
+ # above.  If overridden as a make argument then don't bother trying to
+ # disable it.
+@@ -307,7 +307,7 @@ MK_META_MODE= no
+ .endif	# !defined(_CAN_USE_META_MODE)
+ .endif	# empty(.MAKEOVERRIDES:MMK_META_MODE)
+ 
+-.if ${MK_META_MODE} == "yes"
++.if "${MK_META_MODE}" == "yes"
+ .if !exists(/dev/filemon) && !defined(NO_FILEMON) && !make(showconfig)
+ # Require filemon be loaded to provide a working incremental build
+ .error ${.newline}ERROR: The filemon module (/dev/filemon) is not loaded. \
+@@ -676,7 +676,7 @@ _need_lld_${target}_${target_arch} != \
+ .endif
+ # Setup env for each arch to use the one clang.
+ .if defined(_need_clang_${target}_${target_arch}) && \
+-    ${_need_clang_${target}_${target_arch}} == "yes"
++    "${_need_clang_${target}_${target_arch}}" == "yes"
+ # No check on existing XCC or CROSS_BINUTILS_PREFIX, etc, is needed since
+ # we use the test-system-compiler logic to determine if clang needs to be
+ # built.  It will be no from that logic if already using an external
+@@ -693,21 +693,21 @@ MAKE_PARAMS_${target_arch}+= \
+ 	UNIVERSE_TOOLCHAIN_PATH=${HOST_OBJTOP}/tmp/usr/bin
+ .endif
+ .if defined(_need_lld_${target}_${target_arch}) && \
+-    ${_need_lld_${target}_${target_arch}} == "yes"
++    "${_need_lld_${target}_${target_arch}}" == "yes"
+ MAKE_PARAMS_${target_arch}+= \
+ 	XLD="${HOST_OBJTOP}/tmp/usr/bin/ld"
+ .endif
+ .endfor
+ .endif	# !make(targets)
+ 
+-.if ${__DO_WORLDS} == "yes"
++.if "${__DO_WORLDS}" == "yes"
+ universe_${target}_done: universe_${target}_worlds .PHONY
+ .for target_arch in ${TARGET_ARCHES_${target}}
+ universe_${target}_worlds: universe_${target}_${target_arch} .PHONY
+ .if (defined(_need_clang_${target}_${target_arch}) && \
+-    ${_need_clang_${target}_${target_arch}} == "yes") || \
++	"${_need_clang_${target}_${target_arch}}" == "yes") || \
+     (defined(_need_lld_${target}_${target_arch}) && \
+-    ${_need_lld_${target}_${target_arch}} == "yes")
++    "${_need_lld_${target}_${target_arch}}" == "yes")
+ universe_${target}_${target_arch}: universe-toolchain
+ universe_${target}_prologue: universe-toolchain
+ .endif
+@@ -726,7 +726,7 @@ universe_${target}_${target_arch}: universe_${target}_prologue .MAKE .PHONY
+ .endfor
+ .endif # ${__DO_WORLDS} == "yes"
+ 
+-.if ${__DO_KERNELS} == "yes"
++.if "${__DO_KERNELS}" == "yes"
+ universe_${target}_done: universe_${target}_kernels .PHONY
+ universe_${target}_kernels: universe_${target}_worlds .PHONY
+ universe_${target}_kernels: universe_${target}_prologue .MAKE .PHONY
 diff --git a/Makefile.inc1 b/Makefile.inc1
-index 12397abee..d1f56192b 100644
+index 12397abee..4e81be8f9 100644
 --- a/Makefile.inc1
 +++ b/Makefile.inc1
 @@ -133,8 +133,8 @@ _TARGET_CPUTYPE=${TARGET_CPUTYPE}
@@ -549,13 +634,15 @@ index 12397abee..d1f56192b 100644
  _gensnmptree=	usr.sbin/bsnmpd/gensnmptree
  .endif
  
-@@ -2424,18 +2424,18 @@ _gensnmptree=	usr.sbin/bsnmpd/gensnmptree
+@@ -2424,37 +2424,39 @@ _gensnmptree=	usr.sbin/bsnmpd/gensnmptree
  # We need to build tblgen when we're building clang or lld, either as
  # bootstrap tools, or as the part of the normal build.
  # llvm-tblgen is also needed for various llvm binutils (e.g. objcopy).
 -.if ${MK_CLANG_BOOTSTRAP} != "no" || ${MK_CLANG} != "no" || \
 -    ${MK_LLD_BOOTSTRAP} != "no" || ${MK_LLD} != "no" || \
 -    ${MK_LLDB} != "no" || ${MK_LLVM_BINUTILS} != "no"
++#
++# Backported llvm-min-tblgen code from releng/14.1 since it was removed in 14.0 for some reason
 +.if "${MK_CLANG_BOOTSTRAP}" != "no" || "${MK_CLANG}" != "no" || \
 +    "${MK_LLD_BOOTSTRAP}" != "no" || "${MK_LLD}" != "no" || \
 +    "${MK_LLDB}" != "no" || "${MK_LLVM_BINUTILS}" != "no"
@@ -574,7 +661,12 @@ index 12397abee..d1f56192b 100644
  _clang_tblgen+=	usr.bin/clang/lldb-tblgen
  .endif
  ${_bt}-usr.bin/clang/clang-tblgen: ${_bt}-lib/clang/libllvmminimal
-@@ -2447,14 +2447,14 @@ ${_bt}-usr.bin/clang/lldb-tblgen: ${_bt}-lib/clang/libllvmminimal
+-${_bt}-usr.bin/clang/llvm-tblgen: ${_bt}-lib/clang/libllvmminimal
+ ${_bt}-usr.bin/clang/lldb-tblgen: ${_bt}-lib/clang/libllvmminimal
++${_bt}-usr.bin/clang/llvm-tblgen: ${_bt}-lib/clang/libllvmminimal
+ .endif
+ 
+ # C.UTF-8 is always built in share/ctypes and we need localedef for that.
  _localedef=	usr.bin/localedef
  ${_bt}-usr.bin/localedef: ${_bt}-usr.bin/yacc ${_bt_lex_depend}
  
@@ -591,7 +683,7 @@ index 12397abee..d1f56192b 100644
  _kerberos5_bootstrap_tools= \
  	kerberos5/tools/make-roken \
  	kerberos5/lib/libroken \
-@@ -2521,13 +2521,13 @@ _basic_bootstrap_tools+=usr.bin/mkfifo
+@@ -2521,13 +2523,13 @@ _basic_bootstrap_tools+=usr.bin/mkfifo
  # jot is needed for the mkimg tests
  _basic_bootstrap_tools+=usr.bin/jot
  
@@ -607,7 +699,7 @@ index 12397abee..d1f56192b 100644
  _basic_bootstrap_tools+=usr.sbin/tzsetup
  .endif
  
-@@ -2649,25 +2649,25 @@ ${_bt}-sbin/md5: ${_bt}-lib/libmd
+@@ -2649,25 +2651,25 @@ ${_bt}-sbin/md5: ${_bt}-lib/libmd
  _share=	share/syscons/scrnmaps
  .endif
  
@@ -638,7 +730,7 @@ index 12397abee..d1f56192b 100644
  _bt_clean=	${CLEANDIR}
  .endif
  
-@@ -2705,21 +2705,21 @@ kernel-tools: .PHONY
+@@ -2705,21 +2707,21 @@ kernel-tools: .PHONY
  # to begin building the target binaries.
  #
  .if ${TARGET_ARCH} != ${MACHINE_ARCH} || ${BUILD_WITH_STRICT_TMPPATH} != 0
@@ -663,7 +755,7 @@ index 12397abee..d1f56192b 100644
  _elftctools=	lib/libelftc \
  		lib/libpe \
  		usr.bin/elfctl \
-@@ -2732,7 +2732,7 @@ _elftctools=	lib/libelftc \
+@@ -2732,7 +2734,7 @@ _elftctools=	lib/libelftc \
  # cross-build on a FreeBSD 10 host:
  _elftctools+=	usr.bin/addr2line
  .endif
@@ -672,7 +764,7 @@ index 12397abee..d1f56192b 100644
  # If cross-building with an external binutils we still need to build strip for
  # the target (for at least crunchide).
  _elftctools=	lib/libelftc \
-@@ -2742,16 +2742,16 @@ _elftctools=	lib/libelftc \
+@@ -2742,16 +2744,16 @@ _elftctools=	lib/libelftc \
  		usr.bin/objcopy
  .endif
  
@@ -693,7 +785,7 @@ index 12397abee..d1f56192b 100644
  _usb_tools=	stand/usb/tools
  .endif
  
-@@ -2858,7 +2858,7 @@ NXBDIRS+= \
+@@ -2858,7 +2860,7 @@ NXBDIRS+= \
      usr.sbin/chown
  
  SUBDIR_DEPEND_usr.bin/clang=	lib/clang
@@ -702,7 +794,7 @@ index 12397abee..d1f56192b 100644
  NXBDIRS+=	lib/clang
  NXBDIRS+=	usr.bin/clang
  .endif
-@@ -2914,7 +2914,7 @@ NXBTMAKE=	${NXBMAKEENV} ${MAKE} ${NXBMAKEARGS:N-DNO_PIC:N-DNO_SHARED} \
+@@ -2914,7 +2916,7 @@ NXBTMAKE=	${NXBMAKEENV} ${MAKE} ${NXBMAKEARGS:N-DNO_PIC:N-DNO_SHARED} \
  # TARGET/TARGET_ARCH are still passed along from user.
  #
  # Use the toolchain we create as an external toolchain.
@@ -711,7 +803,7 @@ index 12397abee..d1f56192b 100644
  NXBMAKE+=	XCC="${XCC}" \
  		XCXX="${XCXX}" \
  		XCPP="${XCPP}"
-@@ -2989,15 +2989,15 @@ libraries: .MAKE .PHONY
+@@ -2989,15 +2991,15 @@ libraries: .MAKE .PHONY
  # static libgcc.a prerequisite for shared libc
  #
  _prereq_libs= lib/libcompiler_rt
@@ -730,7 +822,7 @@ index 12397abee..d1f56192b 100644
  _prereq_libs+=	lib/libclang_rt/ubsan_minimal
  _prereq_libs+=	lib/libclang_rt/ubsan_standalone
  _prereq_libs+=	lib/libclang_rt/ubsan_standalone_cxx
-@@ -3060,26 +3060,26 @@ _prebuild_libs=	${_kerberos5_lib_libasn1} \
+@@ -3060,26 +3062,26 @@ _prebuild_libs=	${_kerberos5_lib_libasn1} \
  		${_secure_lib_libcrypto} ${_secure_lib_libssl} \
  		${_lib_libldns} ${_secure_lib_libssh}
  
@@ -761,7 +853,7 @@ index 12397abee..d1f56192b 100644
  _prebuild_libs+= \
  	lib/ofed/libibverbs \
  	lib/ofed/libibmad \
-@@ -3092,7 +3092,7 @@ lib/ofed/complib__L:	lib/libthr__L
+@@ -3092,7 +3094,7 @@ lib/ofed/complib__L:	lib/libthr__L
  lib/ofed/libmlx5__L:	lib/ofed/libibverbs__L lib/libthr__L
  .endif
  
@@ -770,7 +862,7 @@ index 12397abee..d1f56192b 100644
  _lib_casper=	lib/libcasper
  .endif
  
-@@ -3103,18 +3103,18 @@ lib/libzstd__L: lib/libthr__L
+@@ -3103,18 +3105,18 @@ lib/libzstd__L: lib/libthr__L
  lib/librt__L: lib/libthr__L
  
  _generic_libs=	${_cddl_lib} gnu/lib ${_kerberos5_lib} lib ${_secure_lib}
@@ -792,7 +884,7 @@ index 12397abee..d1f56192b 100644
  _cddl_lib_libumem= cddl/lib/libumem
  _cddl_lib_libnvpair= cddl/lib/libnvpair
  _cddl_lib_libavl= cddl/lib/libavl
-@@ -3125,7 +3125,7 @@ cddl/lib/libavl__L: cddl/lib/libspl__L
+@@ -3125,7 +3127,7 @@ cddl/lib/libavl__L: cddl/lib/libspl__L
  cddl/lib/libnvpair__L: cddl/lib/libspl__L
  cddl/lib/libuutil__L: cddl/lib/libavl__L cddl/lib/libspl__L
  
@@ -801,7 +893,7 @@ index 12397abee..d1f56192b 100644
  _lib_librt= lib/librt
  _cddl_lib_libicp= cddl/lib/libicp
  _cddl_lib_libicp_rescue= cddl/lib/libicp_rescue
-@@ -3160,23 +3160,23 @@ lib/libprocstat__L: lib/libelf__L lib/libkvm__L lib/libutil__L
+@@ -3160,23 +3162,23 @@ lib/libprocstat__L: lib/libelf__L lib/libkvm__L lib/libutil__L
  lib/libproc__L: lib/libprocstat__L
  lib/librtld_db__L: lib/libprocstat__L
  
@@ -831,7 +923,7 @@ index 12397abee..d1f56192b 100644
  secure/lib/libssh__L: lib/libgssapi__L kerberos5/lib/libkrb5__L \
      kerberos5/lib/libhx509__L kerberos5/lib/libasn1__L lib/libcom_err__L \
      lib/libmd__L kerberos5/lib/libroken__L
-@@ -3186,7 +3186,7 @@ secure/lib/libssh__L: lib/libgssapi__L kerberos5/lib/libkrb5__L \
+@@ -3186,7 +3188,7 @@ secure/lib/libssh__L: lib/libgssapi__L kerberos5/lib/libkrb5__L \
  _secure_lib=	secure/lib
  .endif
  
@@ -840,7 +932,7 @@ index 12397abee..d1f56192b 100644
  kerberos5/lib/libasn1__L: lib/libcom_err__L kerberos5/lib/libroken__L
  kerberos5/lib/libhdb__L: kerberos5/lib/libasn1__L lib/libcom_err__L \
      kerberos5/lib/libkrb5__L kerberos5/lib/libroken__L \
-@@ -3207,11 +3207,11 @@ kerberos5/lib/libheimipcc__L: kerberos5/lib/libroken__L kerberos5/lib/libheimbas
+@@ -3207,11 +3209,11 @@ kerberos5/lib/libheimipcc__L: kerberos5/lib/libroken__L kerberos5/lib/libheimbas
  
  lib/libsqlite3__L: lib/libthr__L
  
@@ -854,7 +946,7 @@ index 12397abee..d1f56192b 100644
  _kerberos5_lib=	kerberos5/lib
  _kerberos5_lib_libasn1= kerberos5/lib/libasn1
  _kerberos5_lib_libhdb= kerberos5/lib/libhdb
-@@ -3226,11 +3226,11 @@ _kerberos5_lib_libwind= kerberos5/lib/libwind
+@@ -3226,11 +3228,11 @@ _kerberos5_lib_libwind= kerberos5/lib/libwind
  _libcom_err= lib/libcom_err
  .endif
  
@@ -868,7 +960,7 @@ index 12397abee..d1f56192b 100644
  lib/libradius__L: lib/libmd__L
  .endif
  
-@@ -3522,7 +3522,7 @@ BW_CANONICALOBJDIR:=${OBJTOP}/
+@@ -3522,7 +3524,7 @@ BW_CANONICALOBJDIR:=${OBJTOP}/
  BW_CANONICALOBJDIR:=${KRNLOBJDIR}/${KERNCONF}/
  .elif make(cleanuniverse)
  BW_CANONICALOBJDIR:=${OBJROOT}
@@ -877,7 +969,7 @@ index 12397abee..d1f56192b 100644
  .error ${.TARGETS} only supported with WITH_UNIFIED_OBJDIR enabled.
  .endif
  .endif
-@@ -3533,7 +3533,7 @@ cleanworld cleanuniverse cleankernel: .PHONY
+@@ -3533,7 +3535,7 @@ cleanworld cleanuniverse cleankernel: .PHONY
  	-chflags -R 0 ${BW_CANONICALOBJDIR}
  	-(cd ${BW_CANONICALOBJDIR} && rm -rf *)
  .endif
@@ -886,7 +978,7 @@ index 12397abee..d1f56192b 100644
      (empty(BW_CANONICALOBJDIR) || ${.CURDIR:tA} == ${BW_CANONICALOBJDIR:tA})
  .if ${.CURDIR} == ${.OBJDIR} || ${.CURDIR}/obj == ${.OBJDIR}
  	#   To be safe in this case, fall back to a 'make cleandir'
-@@ -3595,7 +3595,7 @@ CDTMP=	${OBJTOP}/${XDDIR}/tmp
+@@ -3595,7 +3597,7 @@ CDTMP=	${OBJTOP}/${XDDIR}/tmp
  CDMAKE=${CDENV} PATH=${CDTMP:Q}/usr/bin:${PATH:Q} ${MAKE} ${CDMAKEARGS} ${NOFUN}
  CD2MAKE=${CD2ENV} PATH=${CDTMP:Q}/usr/bin:${XDDESTDIR:Q}/usr/bin:${PATH:Q} \
  	${MAKE} ${CD2MAKEARGS} ${NOFUN}
@@ -895,7 +987,7 @@ index 12397abee..d1f56192b 100644
  # Don't rebuild build-tools targets during normal build.
  CD2MAKE+=	BUILD_TOOLS_META=.NOMETA
  .endif
-@@ -3658,7 +3658,7 @@ _xi-mtree: .PHONY
+@@ -3658,7 +3660,7 @@ _xi-mtree: .PHONY
  	${DESTDIR_MTREE} -f ${.CURDIR}/etc/mtree/BSD.lib${libcompat}.dist \
  	    -p ${XDDESTDIR}/usr >/dev/null
  .endfor
